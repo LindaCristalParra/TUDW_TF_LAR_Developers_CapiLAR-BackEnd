@@ -1,0 +1,27 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum Rol {
+  ADMIN
+  PROFESIONAL
+  CLIENTE
+}
+
+model Usuario {
+  id         Int       @id @default(autoincrement())
+  nombre     String
+  apellido   String
+  email      String    @unique
+  telefono   String?
+  contrasena String
+  rol        Rol
+  fechaAlta  DateTime  @default(now())
+  fechaBaja  DateTime?
+}
