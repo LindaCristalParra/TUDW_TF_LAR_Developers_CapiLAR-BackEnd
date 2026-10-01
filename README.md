@@ -64,10 +64,12 @@ npm install
 Create a `.env` file in the project root (it is git-ignored and must never be committed):
 
 ```env
-DATABASE_URL="mysql://user:password@localhost:3306/capilar_db"
+DATABASE_URL="mysql://root:password@localhost:3306/capilar_db?allowPublicKeyRetrieval=true"
+JWT_SECRET="a-long-random-string"
+JWT_EXPIRES_IN="1d"
 ```
 
-A `.env.example` file with the required variable names is kept in the repository as a reference.
+See `.env.example` for the full list of variables. `allowPublicKeyRetrieval=true` is required so the MariaDB driver adapter can authenticate against MySQL 8 without SSL.
 
 ### Database
 
