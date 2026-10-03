@@ -1,17 +1,27 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { createHash, randomBytes } from 'crypto';
 import { Rol, Usuario } from '../generated/prisma/client';
 import { PublicUser, UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtPayload } from './jwt-payload.interface';
 
 const BCRYPT_SALT_ROUNDS = 10;
+const RESET_TOKEN_TTL_MS = 15 * 60 * 1000;
+
+// SHA-256 (not bcrypt): deterministic, so the user can be looked up by the hash.
+function hashResetToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
 
 export interface AuthResponse {
   accessToken: string;
@@ -20,6 +30,8 @@ export interface AuthResponse {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
@@ -56,6 +68,46 @@ export class AuthService {
     }
 
     return this.buildAuthResponse(user);
+  }
+
+  async forgotPassword(email: string): Promise<void> {
+    const user = await this.usersService.findByEmail(email.toLowerCase());
+    // Silent return: the response must not reveal whether the email exists.
+    if (!user || user.fechaBaja !== null) {
+      return;
+    }
+
+    const token = randomBytes(32).toString('hex');
+    const expira = new Date(Date.now() + RESET_TOKEN_TTL_MS);
+
+    await this.usersService.setResetToken(
+      user.id,
+      hashResetToken(token),
+      expira,
+    );
+
+    // TODO: send by email; logged until there is a mail service.
+    this.logger.log(`Password reset token for ${user.email}: ${token}`);
+  }
+
+  async resetPassword(dto: ResetPasswordDto): Promise<void> {
+    const user = await this.usersService.findByResetToken(
+      hashResetToken(dto.token),
+    );
+    const isValid =
+      user !== null &&
+      user.fechaBaja === null &&
+      user.resetTokenExpira !== null &&
+      user.resetTokenExpira > new Date();
+
+    if (!isValid) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    await this.usersService.updatePassword(
+      user.id,
+      await bcrypt.hash(dto.contrasena, BCRYPT_SALT_ROUNDS),
+    );
   }
 
   private async buildAuthResponse(user: Usuario): Promise<AuthResponse> {

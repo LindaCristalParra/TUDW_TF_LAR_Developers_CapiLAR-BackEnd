@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, Usuario } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
-export type PublicUser = Omit<Usuario, 'contrasena'>;
+export type PublicUser = Omit<
+  Usuario,
+  'contrasena' | 'resetToken' | 'resetTokenExpira'
+>;
 
 @Injectable()
 export class UsersService {
@@ -21,7 +24,35 @@ export class UsersService {
   }
 
   toPublic(user: Usuario): PublicUser {
-    const { contrasena: _contrasena, ...publicUser } = user;
+    const {
+      contrasena: _contrasena,
+      resetToken: _resetToken,
+      resetTokenExpira: _resetTokenExpira,
+      ...publicUser
+    } = user;
     return publicUser;
+  }
+
+  setResetToken(id: number, tokenHash: string, expira: Date): Promise<Usuario> {
+    return this.prisma.usuario.update({
+      where: { id },
+      data: { resetToken: tokenHash, resetTokenExpira: expira },
+    });
+  }
+
+  findByResetToken(tokenHash: string): Promise<Usuario | null> {
+    return this.prisma.usuario.findFirst({ where: { resetToken: tokenHash } });
+  }
+
+  // Clears the reset token too, so each token can only be used once.
+  updatePassword(id: number, contrasenaHash: string): Promise<Usuario> {
+    return this.prisma.usuario.update({
+      where: { id },
+      data: {
+        contrasena: contrasenaHash,
+        resetToken: null,
+        resetTokenExpira: null,
+      },
+    });
   }
 }
