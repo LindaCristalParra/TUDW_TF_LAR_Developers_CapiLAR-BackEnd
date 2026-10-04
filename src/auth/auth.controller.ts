@@ -37,7 +37,7 @@ export class AuthController {
     await this.authService.forgotPassword(dto.email);
     return {
       message:
-        'If the email is registered, you will receive instructions to reset your password',
+        'Si el email está registrado, vas a recibir las instrucciones para restablecer tu contraseña',
     };
   }
 
@@ -45,7 +45,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.authService.resetPassword(dto);
-    return { message: 'Password updated successfully' };
+    return { message: 'Contraseña actualizada correctamente' };
   }
 
   @Get('me')

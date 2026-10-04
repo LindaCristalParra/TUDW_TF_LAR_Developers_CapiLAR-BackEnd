@@ -1,6 +1,10 @@
+import { Transform } from 'class-transformer';
 import { IsEmail } from 'class-validator';
 
 export class ForgotPasswordDto {
-  @IsEmail()
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsEmail({}, { message: 'El email no es válido' })
   email: string;
 }

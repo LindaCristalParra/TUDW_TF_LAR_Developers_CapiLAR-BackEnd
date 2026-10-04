@@ -42,7 +42,7 @@ export class AuthService {
   async register(dto: RegisterDto): Promise<AuthResponse> {
     const email = dto.email.toLowerCase();
     if (await this.usersService.findByEmail(email)) {
-      throw new ConflictException('Email is already registered');
+      throw new ConflictException('El email ya está registrado');
     }
 
     const user = await this.usersService.create({
@@ -66,7 +66,7 @@ export class AuthService {
       (await bcrypt.compare(dto.contrasena, user.contrasena));
 
     if (!isValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Email o contraseña incorrectos');
     }
 
     return this.buildAuthResponse(user);
@@ -110,7 +110,9 @@ export class AuthService {
       user.resetTokenExpira > new Date();
 
     if (!isValid) {
-      throw new BadRequestException('Invalid or expired reset token');
+      throw new BadRequestException(
+        'El enlace para restablecer la contraseña no es válido o ya venció',
+      );
     }
 
     await this.usersService.updatePassword(
