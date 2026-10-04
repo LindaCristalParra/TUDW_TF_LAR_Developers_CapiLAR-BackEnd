@@ -9,6 +9,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
 import { Rol, Usuario } from '../generated/prisma/client';
+import { MailService } from '../mail/mail.service';
 import { PublicUser, UsersService } from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -35,6 +36,7 @@ export class AuthService {
   constructor(
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
+    private readonly mailService: MailService,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
@@ -86,8 +88,15 @@ export class AuthService {
       expira,
     );
 
-    // TODO: send by email; logged until there is a mail service.
-    this.logger.log(`Password reset token for ${user.email}: ${token}`);
+    // A failure must not change the response, or it would reveal that the email exists.
+    try {
+      await this.mailService.sendPasswordReset(user.email, user.nombre, token);
+    } catch (error) {
+      this.logger.error(
+        `Could not send password reset email to ${user.email}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   async resetPassword(dto: ResetPasswordDto): Promise<void> {
