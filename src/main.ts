@@ -9,6 +9,8 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      // One message per field. Validators run bottom-up, so DTOs list the basic rule last.
+      stopAtFirstError: true,
     }),
   );
   await app.listen(process.env.PORT ?? 3000);
