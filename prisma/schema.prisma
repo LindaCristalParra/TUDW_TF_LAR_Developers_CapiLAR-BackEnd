@@ -15,13 +15,15 @@ enum Rol {
 }
 
 model Usuario {
-  id         Int       @id @default(autoincrement())
-  nombre     String
-  apellido   String
-  email      String    @unique
-  telefono   String?
-  contrasena String
-  rol        Rol
-  fechaAlta  DateTime  @default(now())
-  fechaBaja  DateTime?
+  id               Int       @id @default(autoincrement())
+  nombre           String
+  apellido         String
+  email            String    @unique
+  telefono         String?
+  contrasena       String
+  rol              Rol
+  fechaAlta        DateTime  @default(now())
+  fechaBaja        DateTime?
+  resetToken       String?
+  resetTokenExpira DateTime?
 }
