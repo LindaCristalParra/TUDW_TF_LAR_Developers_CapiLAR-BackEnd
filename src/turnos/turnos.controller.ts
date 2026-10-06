@@ -20,6 +20,7 @@ import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import { PublicUser } from '../users/users.service';
 import { AgendaQueryDto } from './dto/agenda-query.dto';
+import { CancelarTurnoDto } from './dto/cancelar-turno.dto';
 import { CreateTurnoDto } from './dto/create-turno.dto';
 import { HorariosLibresDto } from './dto/horarios-libres.dto';
 import { RechazarTurnoDto } from './dto/rechazar-turno.dto';
@@ -136,5 +137,34 @@ export class TurnosController {
     @Req() req: Request,
   ) {
     return this.turnosService.aceptarReprogramacion(id, req.user as PublicUser);
+  }
+
+  /**
+   * Cancelar un turno
+   *
+   * @remarks Pasa a CANCELADO y el horario se libera. CLIENTE: sus turnos
+   * pendientes o reprogramados antes de que empiecen, y los confirmados hasta
+   * 12 horas antes; el motivo es opcional y se avisa por mail a los
+   * profesionales. Profesional del turno o ADMIN: en cualquier momento, con
+   * motivo obligatorio; el cliente recibe un mail con el motivo.
+   */
+  @Patch(':id/cancelar')
+  cancelar(
+    @Param('id', ParseIdPipe) id: number,
+    @Body() dto: CancelarTurnoDto,
+    @Req() req: Request,
+  ) {
+    return this.turnosService.cancelar(id, dto, req.user as PublicUser);
+  }
+
+  /**
+   * Marcar un turno como completado (profesional del turno o ADMIN)
+   *
+   * @remarks CONFIRMADO → COMPLETADO, a partir de la hora de inicio del turno.
+   */
+  @Patch(':id/completar')
+  @Roles(Rol.PROFESIONAL, Rol.ADMIN)
+  completar(@Param('id', ParseIdPipe) id: number, @Req() req: Request) {
+    return this.turnosService.completar(id, req.user as PublicUser);
   }
 }

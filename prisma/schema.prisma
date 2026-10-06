@@ -121,8 +121,8 @@ model Turno {
   horaFin       String      @db.Char(5)
   metodoPago    MetodoPago?
   estado        EstadoTurno @default(PENDIENTE)
-  // Internal reason when a professional doesn't accept the request (not shown to the client).
-  motivoRechazo String?     @db.VarChar(500)
+  // Why it was rejected (internal, not shown to the client) or canceled (shown to both sides).
+  motivo        String?     @db.VarChar(500)
 
   cliente  Cliente        @relation(fields: [clienteId], references: [usuarioId])
   detalles TurnoDetalle[]
