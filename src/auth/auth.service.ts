@@ -8,9 +8,13 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
-import { Rol, Usuario } from '../generated/prisma/client';
+import { Rol } from '../generated/prisma/client';
 import { MailService } from '../mail/mail.service';
-import { PublicUser, UsersService } from '../users/users.service';
+import {
+  PublicUser,
+  UsersService,
+  UsuarioConPerfil,
+} from '../users/users.service';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -53,6 +57,7 @@ export class AuthService {
       contrasena: await bcrypt.hash(dto.contrasena, BCRYPT_SALT_ROUNDS),
       // Public sign-up only creates clients; staff accounts are created by an admin.
       rol: Rol.CLIENTE,
+      cliente: { create: { alergia: dto.alergia } },
     });
 
     return this.buildAuthResponse(user);
@@ -121,7 +126,9 @@ export class AuthService {
     );
   }
 
-  private async buildAuthResponse(user: Usuario): Promise<AuthResponse> {
+  private async buildAuthResponse(
+    user: UsuarioConPerfil,
+  ): Promise<AuthResponse> {
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,

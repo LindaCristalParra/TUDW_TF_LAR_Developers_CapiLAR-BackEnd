@@ -31,9 +31,17 @@ export class RegisterDto {
 
   @MaxLength(30, { message: 'El teléfono no puede superar los 30 caracteres' })
   @IsString({ message: 'El teléfono debe ser un texto' })
+  @IsNotEmpty({ message: 'El teléfono es obligatorio' })
+  @Trim()
+  telefono: string;
+
+  @MaxLength(255, {
+    message: 'La alergia no puede superar los 255 caracteres',
+  })
+  @IsString({ message: 'La alergia debe ser un texto' })
   @IsOptional()
   @Trim()
-  telefono?: string;
+  alergia?: string;
 
   @MaxLength(72, {
     message: 'La contraseña no puede superar los 72 caracteres',

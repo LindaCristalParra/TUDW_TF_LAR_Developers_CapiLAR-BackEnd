@@ -2,8 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, Usuario } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
+// Subtype rows (DER: Cliente / Profesional) loaded with the user.
+const perfilInclude = {
+  cliente: true,
+  profesional: true,
+} satisfies Prisma.UsuarioInclude;
+
+export type UsuarioConPerfil = Prisma.UsuarioGetPayload<{
+  include: typeof perfilInclude;
+}>;
+
 export type PublicUser = Omit<
-  Usuario,
+  UsuarioConPerfil,
   'contrasena' | 'resetToken' | 'resetTokenExpira'
 >;
 
@@ -11,19 +21,25 @@ export type PublicUser = Omit<
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  create(data: Prisma.UsuarioCreateInput): Promise<Usuario> {
-    return this.prisma.usuario.create({ data });
+  create(data: Prisma.UsuarioCreateInput): Promise<UsuarioConPerfil> {
+    return this.prisma.usuario.create({ data, include: perfilInclude });
   }
 
-  findByEmail(email: string): Promise<Usuario | null> {
-    return this.prisma.usuario.findUnique({ where: { email } });
+  findByEmail(email: string): Promise<UsuarioConPerfil | null> {
+    return this.prisma.usuario.findUnique({
+      where: { email },
+      include: perfilInclude,
+    });
   }
 
-  findById(id: number): Promise<Usuario | null> {
-    return this.prisma.usuario.findUnique({ where: { id } });
+  findById(id: number): Promise<UsuarioConPerfil | null> {
+    return this.prisma.usuario.findUnique({
+      where: { id },
+      include: perfilInclude,
+    });
   }
 
-  toPublic(user: Usuario): PublicUser {
+  toPublic(user: UsuarioConPerfil): PublicUser {
     const {
       contrasena: _contrasena,
       resetToken: _resetToken,
