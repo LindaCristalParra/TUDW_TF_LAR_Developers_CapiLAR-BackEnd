@@ -14,6 +14,25 @@ enum Rol {
   CLIENTE
 }
 
+enum MetodoPago {
+  EFECTIVO
+  DEBITO
+  CREDITO
+  TRANSFERENCIA
+}
+
+// PENDIENTE: requested by the client, waiting for a professional.
+// REPROGRAMADO: moved by the salon, waiting for the client to accept.
+// RECHAZADO and CANCELADO free the time slot.
+enum EstadoTurno {
+  PENDIENTE
+  CONFIRMADO
+  REPROGRAMADO
+  COMPLETADO
+  RECHAZADO
+  CANCELADO
+}
+
 model Usuario {
   id               Int       @id @default(autoincrement())
   nombre           String
@@ -37,11 +56,90 @@ model Cliente {
   alergia   String? @db.VarChar(255)
 
   usuario Usuario @relation(fields: [usuarioId], references: [id])
+  turnos  Turno[]
 }
 
 model Profesional {
   legajo    Int @id @default(autoincrement())
   usuarioId Int @unique
 
-  usuario Usuario @relation(fields: [usuarioId], references: [id])
+  usuario         Usuario                 @relation(fields: [usuarioId], references: [id])
+  disponibilidad  DisponibilidadHoraria[]
+  bloqueos        BloqueoAgenda[]
+  detallesDeTurno TurnoDetalle[]
+}
+
+// Times of day are "HH:mm" strings in the salon's local time, so there are no time zone shifts.
+// fechaBaja on Servicio, DisponibilidadHoraria and BloqueoAgenda: logical delete (ARQ-01).
+
+model Servicio {
+  id             Int       @id @default(autoincrement())
+  tipo           String    @db.VarChar(100)
+  // Minutes.
+  tiempoDuracion Int
+  precio         Decimal   @db.Decimal(10, 2)
+  fechaBaja      DateTime?
+
+  detallesDeTurno TurnoDetalle[]
+}
+
+// Weekly working hours of a professional.
+model DisponibilidadHoraria {
+  id            Int       @id @default(autoincrement())
+  profesionalId Int
+  // 0 = domingo ... 6 = sábado.
+  diaSemana     Int
+  horarioInicio String    @db.Char(5)
+  horarioFin    String    @db.Char(5)
+  fechaBaja     DateTime?
+
+  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
+
+  @@index([profesionalId, diaSemana])
+}
+
+// Time off of a professional. Date-times are local wall-clock times stored as-is.
+model BloqueoAgenda {
+  id            Int       @id @default(autoincrement())
+  profesionalId Int
+  fechaInicio   DateTime
+  fechaFin      DateTime
+  motivo        String?   @db.VarChar(255)
+  fechaBaja     DateTime?
+
+  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
+
+  @@index([profesionalId, fechaInicio])
+}
+
+// A cancelled turno keeps its row with estado CANCELADO (logical delete).
+model Turno {
+  id            Int         @id @default(autoincrement())
+  clienteId     Int
+  fecha         DateTime    @db.Date
+  horaInicio    String      @db.Char(5)
+  horaFin       String      @db.Char(5)
+  metodoPago    MetodoPago?
+  estado        EstadoTurno @default(PENDIENTE)
+  // Why it was rejected (internal, not shown to the client) or canceled (shown to both sides).
+  motivo        String?     @db.VarChar(500)
+
+  cliente  Cliente        @relation(fields: [clienteId], references: [usuarioId])
+  detalles TurnoDetalle[]
+
+  @@index([fecha])
+}
+
+// One row per service. Services run one after another in id order, each with its own professional.
+model TurnoDetalle {
+  id            Int     @id @default(autoincrement())
+  turnoId       Int
+  profesionalId Int
+  servicioId    Int
+  // Price when booked, so later price changes don't alter past turnos.
+  precioBase    Decimal @db.Decimal(10, 2)
+
+  turno       Turno       @relation(fields: [turnoId], references: [id])
+  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
+  servicio    Servicio    @relation(fields: [servicioId], references: [id])
 }
