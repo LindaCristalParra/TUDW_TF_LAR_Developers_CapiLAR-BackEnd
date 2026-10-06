@@ -6,6 +6,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, Rol, Usuario } from '../generated/prisma/client';
+import {
+  ahoraEnSalon,
+  dateAFecha,
+  esFechaValida,
+  fechaADate,
+} from '../common/fecha-hora';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -20,10 +26,13 @@ export type UsuarioConPerfil = Prisma.UsuarioGetPayload<{
   include: typeof perfilInclude;
 }>;
 
+// fechaNacimiento travels as "YYYY-MM-DD" (or null), like the other dates of the API.
 export type PublicUser = Omit<
   UsuarioConPerfil,
-  'contrasena' | 'resetToken' | 'resetTokenExpira'
->;
+  'contrasena' | 'resetToken' | 'resetTokenExpira' | 'fechaNacimiento'
+> & { fechaNacimiento: string | null };
+
+const FECHA_NACIMIENTO_MINIMA = '1900-01-01';
 
 // What the salon needs to pick a client when booking: no role, dates or tokens.
 const clienteResumenSelect = {
@@ -82,6 +91,11 @@ export class UsersService {
         apellido: dto.apellido,
         email,
         telefono: dto.telefono,
+        // undefined keeps it, null clears it.
+        fechaNacimiento:
+          dto.fechaNacimiento === undefined || dto.fechaNacimiento === null
+            ? dto.fechaNacimiento
+            : this.fechaNacimientoADate(dto.fechaNacimiento),
         cliente:
           dto.alergia === undefined
             ? undefined
@@ -238,9 +252,31 @@ export class UsersService {
       contrasena: _contrasena,
       resetToken: _resetToken,
       resetTokenExpira: _resetTokenExpira,
+      fechaNacimiento,
       ...publicUser
     } = user;
-    return publicUser;
+    return {
+      ...publicUser,
+      fechaNacimiento: fechaNacimiento ? dateAFecha(fechaNacimiento) : null,
+    };
+  }
+
+  /** "YYYY-MM-DD" -> Date for the DATE column. 400 unless it is a real past date. */
+  fechaNacimientoADate(fecha: string): Date {
+    if (!esFechaValida(fecha)) {
+      throw new BadRequestException('La fecha de nacimiento no es válida');
+    }
+    if (fecha >= ahoraEnSalon().fecha) {
+      throw new BadRequestException(
+        'La fecha de nacimiento tiene que ser anterior a hoy',
+      );
+    }
+    if (fecha < FECHA_NACIMIENTO_MINIMA) {
+      throw new BadRequestException(
+        'La fecha de nacimiento no puede ser anterior a 1900',
+      );
+    }
+    return fechaADate(fecha);
   }
 
   setResetToken(id: number, tokenHash: string, expira: Date): Promise<Usuario> {

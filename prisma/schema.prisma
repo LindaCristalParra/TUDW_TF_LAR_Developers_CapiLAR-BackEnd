@@ -39,6 +39,7 @@ model Usuario {
   apellido         String
   email            String    @unique
   telefono         String
+  fechaNacimiento  DateTime? @db.Date
   contrasena       String
   rol              Rol
   fechaAlta        DateTime  @default(now())
