@@ -14,21 +14,40 @@ import {
 import {
   aMinutos,
   ahoraEnSalon,
+  dateAFecha,
+  esFechaValida,
   fechaADate,
+  fechaCorta,
   fechaHoraADate,
   seSuperponen,
 } from '../common/fecha-hora';
 import { MAX_JORNADA } from '../common/reglas-agenda';
 import { PrismaService } from '../prisma/prisma.service';
-import { ESTADOS_OCUPAN } from '../turnos/agenda';
+import {
+  ESTADOS_OCUPAN,
+  MAX_DIAS_ANTICIPACION,
+  tramosOcupados,
+} from '../turnos/agenda';
 import { PublicUser } from '../users/users.service';
 import { CreateBloqueoDto } from './dto/create-bloqueo.dto';
 import { CreateDisponibilidadDto } from './dto/create-disponibilidad.dto';
+
+// Longest period (in days) a schedule query can cover, like the turnos agenda.
+const MAX_DIAS_CONSULTA = 31;
 
 export interface ProfesionalResumen {
   legajo: number;
   nombre: string;
   apellido: string;
+}
+
+/** Working hours of one date. */
+export interface HorarioDeTrabajo {
+  id: number;
+  // "YYYY-MM-DD"
+  fecha: string;
+  horarioInicio: string;
+  horarioFin: string;
 }
 
 @Injectable()
@@ -131,18 +150,45 @@ export class ProfesionalesService {
     }
   }
 
-  findDisponibilidad(legajo: number): Promise<DisponibilidadHoraria[]> {
-    return this.prisma.disponibilidadHoraria.findMany({
-      where: { profesionalId: legajo, fechaBaja: null },
-      orderBy: [{ diaSemana: 'asc' }, { horarioInicio: 'asc' }],
+  // Working hours between two dates (both included), by date and start time.
+  async findDisponibilidad(
+    legajo: number,
+    desde: string,
+    hasta: string,
+  ): Promise<HorarioDeTrabajo[]> {
+    if (!esFechaValida(desde) || !esFechaValida(hasta)) {
+      throw new BadRequestException('Las fechas no son válidas');
+    }
+    if (desde > hasta) {
+      throw new BadRequestException(
+        'desde tiene que ser anterior o igual a hasta',
+      );
+    }
+    const dias =
+      (fechaADate(hasta).getTime() - fechaADate(desde).getTime()) / 86_400_000;
+    if (dias >= MAX_DIAS_CONSULTA) {
+      throw new BadRequestException(
+        `Los horarios se consultan de a ${MAX_DIAS_CONSULTA} días como máximo`,
+      );
+    }
+
+    const horarios = await this.prisma.disponibilidadHoraria.findMany({
+      where: {
+        profesionalId: legajo,
+        fechaBaja: null,
+        fecha: { gte: fechaADate(desde), lte: fechaADate(hasta) },
+      },
+      orderBy: [{ fecha: 'asc' }, { horarioInicio: 'asc' }],
     });
+    return horarios.map((h) => this.formatearHorario(h));
   }
 
+  // Same hours on several dates: every date is checked first, then all are saved together.
   async createDisponibilidad(
     legajo: number,
     dto: CreateDisponibilidadDto,
     actor: PublicUser,
-  ): Promise<DisponibilidadHoraria> {
+  ): Promise<HorarioDeTrabajo[]> {
     this.assertPuedeGestionar(legajo, actor);
     await this.assertActivo(legajo);
 
@@ -153,57 +199,123 @@ export class ProfesionalesService {
         'El horario de inicio tiene que ser anterior al de fin',
       );
     }
+    const fechas = [...dto.fechas].sort();
+    fechas.forEach((fecha) => this.validarFechaDeCarga(fecha));
 
-    const delDia = await this.prisma.disponibilidadHoraria.findMany({
+    const cargados = await this.prisma.disponibilidadHoraria.findMany({
       where: {
         profesionalId: legajo,
-        diaSemana: dto.diaSemana,
         fechaBaja: null,
+        fecha: { in: fechas.map(fechaADate) },
       },
     });
-    if (
-      delDia.some((d) =>
-        seSuperponen(
-          inicio,
-          fin,
-          aMinutos(d.horarioInicio),
-          aMinutos(d.horarioFin),
-        ),
-      )
-    ) {
-      throw new ConflictException(
-        'Se superpone con otro horario cargado ese día',
+    for (const fecha of fechas) {
+      const delDia = cargados.filter((h) => dateAFecha(h.fecha) === fecha);
+      if (
+        delDia.some((h) =>
+          seSuperponen(
+            inicio,
+            fin,
+            aMinutos(h.horarioInicio),
+            aMinutos(h.horarioFin),
+          ),
+        )
+      ) {
+        throw new ConflictException(
+          `El ${fechaCorta(fecha)} se superpone con otro horario cargado ese día`,
+        );
+      }
+      const jornada = delDia.reduce(
+        (total, h) =>
+          total + aMinutos(h.horarioFin) - aMinutos(h.horarioInicio),
+        fin - inicio,
       );
-    }
-    const jornada = delDia.reduce(
-      (total, d) => total + aMinutos(d.horarioFin) - aMinutos(d.horarioInicio),
-      fin - inicio,
-    );
-    if (jornada > MAX_JORNADA) {
-      throw new BadRequestException(
-        'La jornada de un día no puede superar las 12 horas',
-      );
+      if (jornada > MAX_JORNADA) {
+        throw new BadRequestException(
+          `El ${fechaCorta(fecha)} la jornada superaría las 12 horas`,
+        );
+      }
     }
 
-    return this.prisma.disponibilidadHoraria.create({
-      data: { profesionalId: legajo, ...dto },
-    });
+    const creados = await this.prisma.$transaction(
+      fechas.map((fecha) =>
+        this.prisma.disponibilidadHoraria.create({
+          data: {
+            profesionalId: legajo,
+            fecha: fechaADate(fecha),
+            horarioInicio: dto.horarioInicio,
+            horarioFin: dto.horarioFin,
+          },
+        }),
+      ),
+    );
+    return creados.map((h) => this.formatearHorario(h));
   }
 
-  // Logical delete (ARQ-01).
+  // Logical delete (ARQ-01). Not allowed while a turno is booked inside those hours.
   async deactivateDisponibilidad(
     legajo: number,
     id: number,
     actor: PublicUser,
   ): Promise<void> {
     this.assertPuedeGestionar(legajo, actor);
-    const result = await this.prisma.disponibilidadHoraria.updateMany({
+    const horario = await this.prisma.disponibilidadHoraria.findFirst({
       where: { id, profesionalId: legajo, fechaBaja: null },
+    });
+    if (!horario) {
+      throw new NotFoundException('Horario no encontrado');
+    }
+    const fecha = dateAFecha(horario.fecha);
+    this.assertNoPaso(fecha);
+
+    const turnos = await tramosOcupados(this.prisma, [legajo], fecha);
+    const inicio = aMinutos(horario.horarioInicio);
+    const fin = aMinutos(horario.horarioFin);
+    if (turnos.some((t) => seSuperponen(inicio, fin, t.inicio, t.fin))) {
+      throw new ConflictException(
+        'Hay turnos reservados en ese horario: cancelalos o reprogramalos antes de quitarlo',
+      );
+    }
+
+    await this.prisma.disponibilidadHoraria.update({
+      where: { id },
+      data: { fechaBaja: new Date() },
+    });
+  }
+
+  // Logical delete of every working range of a date. Returns how many were removed.
+  async deactivateDisponibilidadDeFecha(
+    legajo: number,
+    fecha: string,
+    actor: PublicUser,
+  ): Promise<number> {
+    this.assertPuedeGestionar(legajo, actor);
+    if (!esFechaValida(fecha)) {
+      throw new BadRequestException('La fecha no es válida');
+    }
+    this.assertNoPaso(fecha);
+
+    const turnos = await tramosOcupados(this.prisma, [legajo], fecha);
+    if (turnos.length > 0) {
+      throw new ConflictException(
+        `Hay turnos reservados el ${fechaCorta(fecha)}: cancelalos o reprogramalos antes de quitar los horarios`,
+      );
+    }
+
+    const result = await this.prisma.disponibilidadHoraria.updateMany({
+      where: {
+        profesionalId: legajo,
+        fecha: fechaADate(fecha),
+        fechaBaja: null,
+      },
       data: { fechaBaja: new Date() },
     });
     if (result.count === 0) {
-      throw new NotFoundException('Horario no encontrado');
+      throw new NotFoundException(
+        `No hay horarios cargados el ${fechaCorta(fecha)}`,
+      );
     }
+    return result.count;
   }
 
   // Upcoming and current blocks (the ones that haven't ended yet).
@@ -288,6 +400,36 @@ export class ProfesionalesService {
     if (result.count === 0) {
       throw new NotFoundException('Bloqueo no encontrado');
     }
+  }
+
+  // A real date, not in the past and within the booking window.
+  private validarFechaDeCarga(fecha: string): void {
+    if (!esFechaValida(fecha)) {
+      throw new BadRequestException(`La fecha ${fecha} no es válida`);
+    }
+    this.assertNoPaso(fecha);
+    const limite = fechaADate(ahoraEnSalon().fecha);
+    limite.setUTCDate(limite.getUTCDate() + MAX_DIAS_ANTICIPACION);
+    if (fecha > dateAFecha(limite)) {
+      throw new BadRequestException(
+        `Solo se pueden cargar horarios hasta ${MAX_DIAS_ANTICIPACION} días adelante (${fechaCorta(fecha)})`,
+      );
+    }
+  }
+
+  private assertNoPaso(fecha: string): void {
+    if (fecha < ahoraEnSalon().fecha) {
+      throw new BadRequestException(`El ${fechaCorta(fecha)} ya pasó`);
+    }
+  }
+
+  private formatearHorario(horario: DisponibilidadHoraria): HorarioDeTrabajo {
+    return {
+      id: horario.id,
+      fecha: dateAFecha(horario.fecha),
+      horarioInicio: horario.horarioInicio,
+      horarioFin: horario.horarioFin,
+    };
   }
 
   // Now as a local wall-clock Date, the format blocks are stored in.

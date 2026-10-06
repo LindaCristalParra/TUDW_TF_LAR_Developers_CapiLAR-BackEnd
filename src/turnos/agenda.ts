@@ -9,7 +9,6 @@ import {
   aMinutos,
   ahoraEnSalon,
   dateAFecha,
-  diaSemana,
   esFechaValida,
   fechaADate,
   seSuperponen,
@@ -201,7 +200,7 @@ export async function cargarContexto(
     db.disponibilidadHoraria.findMany({
       where: {
         profesionalId: { in: legajos },
-        diaSemana: diaSemana(fecha),
+        fecha: inicioDia,
         fechaBaja: null,
       },
     }),
