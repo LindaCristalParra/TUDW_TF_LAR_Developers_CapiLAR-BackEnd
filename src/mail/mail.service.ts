@@ -24,4 +24,16 @@ export class MailService {
       context: { nombre, link },
     });
   }
+
+  async sendWelcome(email: string, nombre: string): Promise<void> {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    const link = `${frontendUrl}/login`;
+
+    await this.mailerService.sendMail({
+      to: email,
+      subject: '¡Bienvenida/o a CapiLAR!',
+      template: 'welcome',
+      context: { nombre, link },
+    });
+  }
 }

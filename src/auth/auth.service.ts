@@ -60,6 +60,15 @@ export class AuthService {
       cliente: { create: { alergia: dto.alergia } },
     });
 
+    // Not awaited: the account already exists, so a slow or failed email
+    // must not delay or break the sign-up response.
+    this.mailService.sendWelcome(user.email, user.nombre).catch((error) => {
+      this.logger.error(
+        `Could not send welcome email to ${user.email}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    });
+
     return this.buildAuthResponse(user);
   }
 
