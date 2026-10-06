@@ -1,9 +1,11 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Usuario } from '../generated/prisma/client';
+import { Prisma, Rol, Usuario } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -71,6 +73,27 @@ export class UsersService {
       include: perfilInclude,
     });
     return this.toPublic(updated);
+  }
+
+  // Logical delete (ARQ-01): the row stays, fechaBaja blocks login and any
+  // token still in use (JwtStrategy reloads the user on every request).
+  async deactivate(id: number, actor: PublicUser): Promise<void> {
+    // An admin can't remove themselves, so there is always at least one admin.
+    if (id === actor.id && actor.rol === Rol.ADMIN) {
+      throw new ForbiddenException(
+        'Un administrador no puede darse de baja a sí mismo',
+      );
+    }
+
+    const user = await this.findById(id);
+    if (!user || user.fechaBaja !== null) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+
+    await this.prisma.usuario.update({
+      where: { id },
+      data: { fechaBaja: new Date(), resetToken: null, resetTokenExpira: null },
+    });
   }
 
   toPublic(user: UsuarioConPerfil): PublicUser {
