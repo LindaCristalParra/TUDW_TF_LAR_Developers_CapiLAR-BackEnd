@@ -3,7 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from '@nestjs/common';
-import { EstadoTurno, Prisma, Rol } from '../generated/prisma/client';
+import { EstadoTurno, Prisma } from '../generated/prisma/client';
 import {
   aHora,
   aMinutos,
@@ -13,7 +13,11 @@ import {
   fechaADate,
   seSuperponen,
 } from '../common/fecha-hora';
-import { MAX_DURACION_TURNO, PASO_HORARIOS } from '../common/reglas-agenda';
+import {
+  MAX_DURACION_TURNO,
+  PASO_HORARIOS,
+  ROLES_QUE_ATIENDEN,
+} from '../common/reglas-agenda';
 
 // Booking rules (decided by the salon).
 export const MAX_DIAS_ANTICIPACION = 60;
@@ -79,7 +83,7 @@ export async function resolverItems(
   const profesionales = await db.profesional.findMany({
     where: {
       legajo: { in: legajos },
-      usuario: { rol: Rol.PROFESIONAL, fechaBaja: null },
+      usuario: { rol: { in: ROLES_QUE_ATIENDEN }, fechaBaja: null },
     },
     select: {
       legajo: true,

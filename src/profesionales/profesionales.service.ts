@@ -21,7 +21,7 @@ import {
   fechaHoraADate,
   seSuperponen,
 } from '../common/fecha-hora';
-import { MAX_JORNADA } from '../common/reglas-agenda';
+import { MAX_JORNADA, ROLES_QUE_ATIENDEN } from '../common/reglas-agenda';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   ESTADOS_OCUPAN,
@@ -57,17 +57,17 @@ export class ProfesionalesService {
   // Active professionals, for clients to choose who to book with.
   // With servicioId, only the ones who do that service.
   async findAll(servicioId?: number): Promise<ProfesionalResumen[]> {
+    const servicioActivo = { fechaBaja: null, servicio: { fechaBaja: null } };
     const profesionales = await this.prisma.profesional.findMany({
       where: {
-        usuario: { rol: Rol.PROFESIONAL, fechaBaja: null },
+        usuario: { rol: { in: ROLES_QUE_ATIENDEN }, fechaBaja: null },
+        // An ADMIN with a legajo shows up only while they do some active service.
+        OR: [
+          { usuario: { rol: Rol.PROFESIONAL } },
+          { servicios: { some: servicioActivo } },
+        ],
         servicios: servicioId
-          ? {
-              some: {
-                servicioId,
-                fechaBaja: null,
-                servicio: { fechaBaja: null },
-              },
-            }
+          ? { some: { servicioId, ...servicioActivo } }
           : undefined,
       },
       select: {
@@ -85,7 +85,7 @@ export class ProfesionalesService {
     }));
   }
 
-  /** 404 unless the legajo belongs to an active user whose current role is PROFESIONAL. */
+  /** 404 unless the legajo belongs to an active PROFESIONAL, or ADMIN who also attends. */
   async assertActivo(legajo: number): Promise<void> {
     const profesional = await this.prisma.profesional.findUnique({
       where: { legajo },
@@ -93,7 +93,7 @@ export class ProfesionalesService {
     });
     if (
       !profesional ||
-      profesional.usuario.rol !== Rol.PROFESIONAL ||
+      !ROLES_QUE_ATIENDEN.includes(profesional.usuario.rol) ||
       profesional.usuario.fechaBaja !== null
     ) {
       throw new NotFoundException('Profesional no encontrado');
@@ -441,7 +441,8 @@ export class ProfesionalesService {
   // ADMIN manages any schedule; a PROFESIONAL only their own.
   private assertPuedeGestionar(legajo: number, actor: PublicUser): void {
     const esPropia =
-      actor.rol === Rol.PROFESIONAL && actor.profesional?.legajo === legajo;
+      ROLES_QUE_ATIENDEN.includes(actor.rol) &&
+      actor.profesional?.legajo === legajo;
     if (actor.rol !== Rol.ADMIN && !esPropia) {
       throw new ForbiddenException('Solo podés gestionar tu propia agenda');
     }

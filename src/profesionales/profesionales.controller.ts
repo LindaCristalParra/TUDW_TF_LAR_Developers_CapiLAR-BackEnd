@@ -40,6 +40,7 @@ export class ProfesionalesController {
    *
    * @remarks Profesionales activos (legajo, nombre y apellido), para elegir con
    * quién reservar. `?servicioId=` muestra solo los que hacen ese servicio.
+   * Incluye a los ADMIN con legajo que tengan algún servicio activo.
    * Público, no hace falta iniciar sesión.
    */
   @Get()

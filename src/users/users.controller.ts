@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   Patch,
+  Post,
   Query,
   Req,
   UseGuards,
@@ -96,6 +97,22 @@ export class UsersController {
     @Req() req: Request,
   ) {
     return this.usersService.changeRol(id, dto.rol, req.user as PublicUser);
+  }
+
+  /**
+   * Asignar legajo a un ADMIN para que también atienda (solo ADMIN)
+   *
+   * @remarks Para el dueño u otro administrador que además trabaja como
+   * profesional: conserva el rol ADMIN y pasa a tener `profesional.legajo`.
+   * Después se le asignan servicios y horarios como a cualquier profesional.
+   * Puede usarlo un ADMIN sobre sí mismo. Un profesional ascendido a ADMIN ya
+   * conserva su legajo. 400 si el usuario no es ADMIN; 409 si ya tiene legajo;
+   * 404 si no existe o está dado de baja.
+   */
+  @Post(':id/legajo')
+  @Roles(Rol.ADMIN)
+  asignarLegajo(@Param('id', ParseIdPipe) id: number) {
+    return this.usersService.asignarLegajo(id);
   }
 
   /**

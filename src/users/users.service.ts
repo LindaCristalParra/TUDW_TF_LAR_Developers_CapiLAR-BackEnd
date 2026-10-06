@@ -168,6 +168,32 @@ export class UsersService {
     return this.toPublic(updated);
   }
 
+  // An ADMIN who also attends turnos (e.g. the salon owner) gets a legajo and
+  // keeps the ADMIN role: services and working hours are then loaded as usual.
+  async asignarLegajo(id: number): Promise<PublicUser> {
+    const user = await this.findById(id);
+    if (!user || user.fechaBaja !== null) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+    if (user.rol !== Rol.ADMIN) {
+      throw new BadRequestException(
+        'Solo se le asigna legajo a un ADMIN; a los demás se les cambia el rol a PROFESIONAL',
+      );
+    }
+    if (user.profesional) {
+      throw new ConflictException(
+        `El usuario ya tiene el legajo ${user.profesional.legajo}`,
+      );
+    }
+
+    const updated = await this.prisma.usuario.update({
+      where: { id },
+      data: { profesional: { create: {} } },
+      include: perfilInclude,
+    });
+    return this.toPublic(updated);
+  }
+
   // Logical delete (ARQ-01): the row stays, fechaBaja blocks login and any
   // token still in use (JwtStrategy reloads the user on every request).
   async deactivate(id: number, actor: PublicUser): Promise<void> {
