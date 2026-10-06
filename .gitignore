@@ -3,6 +3,9 @@
 /node_modules
 /build
 
+# Uploaded profile photos (UPLOADS_DIR)
+/uploads
+
 # TypeScript build cache
 *.tsbuildinfo
 
