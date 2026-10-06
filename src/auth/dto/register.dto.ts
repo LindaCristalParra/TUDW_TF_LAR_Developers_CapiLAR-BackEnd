@@ -6,6 +6,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { HasLetterAndNumber } from './has-letter-and-number.decorator';
 import { Trim } from './trim.decorator';
 
 // Decorators run bottom-up, so the most basic rule goes last (see stopAtFirstError in main.ts).
@@ -52,9 +53,10 @@ export class RegisterDto {
   alergia?: string;
 
   /**
-   * Entre 8 y 72 caracteres.
+   * Entre 8 y 72 caracteres, con al menos una letra y un número.
    * @example "Clave1234"
    */
+  @HasLetterAndNumber()
   @MaxLength(72, {
     message: 'La contraseña no puede superar los 72 caracteres',
   })

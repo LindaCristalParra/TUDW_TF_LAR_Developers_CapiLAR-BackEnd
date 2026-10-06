@@ -6,6 +6,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { HasLetterAndNumber } from './has-letter-and-number.decorator';
 
 // Decorators run bottom-up, so the most basic rule goes last (see stopAtFirstError in main.ts).
 export class ResetPasswordDto {
@@ -16,9 +17,10 @@ export class ResetPasswordDto {
   token: string;
 
   /**
-   * Contraseña nueva, entre 8 y 72 caracteres.
+   * Contraseña nueva, entre 8 y 72 caracteres, con al menos una letra y un número.
    * @example "NuevaClave1234"
    */
+  @HasLetterAndNumber()
   @MaxLength(72, {
     message: 'La contraseña no puede superar los 72 caracteres',
   })
