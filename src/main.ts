@@ -1,10 +1,24 @@
 import { ValidationPipe } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {});
+
+  // Closed list of allowed origins. Without it, cors() would accept any origin.
+  const corsOrigins = app
+    .get(ConfigService)
+    .getOrThrow<string>('CORS_ORIGINS')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  if (!corsOrigins.length) {
+    throw new Error('CORS_ORIGINS is empty');
+  }
+  app.enableCors({ origin: corsOrigins, credentials: true });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
