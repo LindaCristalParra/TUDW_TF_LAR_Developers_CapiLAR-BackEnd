@@ -5,17 +5,23 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Public } from '../auth/public.decorator';
+import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
+import { Rol } from '../generated/prisma/client';
 import { PublicUser } from '../users/users.service';
+import { AsignarServicioDto } from './dto/asignar-servicio.dto';
 import { CreateBloqueoDto } from './dto/create-bloqueo.dto';
 import { CreateDisponibilidadDto } from './dto/create-disponibilidad.dto';
+import { ListProfesionalesQueryDto } from './dto/list-profesionales-query.dto';
 import { ProfesionalesService } from './profesionales.service';
 
 // The /** */ comments on each route are the Swagger summary and description.
@@ -30,11 +36,55 @@ export class ProfesionalesController {
    * Listar profesionales
    *
    * @remarks Profesionales activos (legajo, nombre y apellido), para elegir con
-   * quién reservar. Cualquier usuario logueado.
+   * quién reservar. `?servicioId=` muestra solo los que hacen ese servicio.
+   * Público, no hace falta iniciar sesión.
    */
   @Get()
-  findAll() {
-    return this.profesionalesService.findAll();
+  @Public()
+  findAll(@Query() query: ListProfesionalesQueryDto) {
+    return this.profesionalesService.findAll(query.servicioId);
+  }
+
+  /**
+   * Ver los servicios que hace un profesional
+   *
+   * @remarks Solo los servicios activos. Cualquier usuario logueado.
+   */
+  @Get(':legajo/servicios')
+  async findServicios(@Param('legajo', ParseIdPipe) legajo: number) {
+    await this.profesionalesService.assertActivo(legajo);
+    return this.profesionalesService.findServicios(legajo);
+  }
+
+  /**
+   * Asignar un servicio a un profesional (solo ADMIN)
+   *
+   * @remarks 404 si el profesional o el servicio no existen o están dados de baja;
+   * 409 si ya lo tiene.
+   */
+  @Post(':legajo/servicios')
+  @Roles(Rol.ADMIN)
+  asignarServicio(
+    @Param('legajo', ParseIdPipe) legajo: number,
+    @Body() dto: AsignarServicioDto,
+  ) {
+    return this.profesionalesService.asignarServicio(legajo, dto.servicioId);
+  }
+
+  /**
+   * Quitar un servicio a un profesional (solo ADMIN)
+   *
+   * @remarks Borrado lógico. Los turnos ya reservados con ese servicio no se
+   * tocan; solo deja de poder reservarse con este profesional.
+   */
+  @Delete(':legajo/servicios/:servicioId')
+  @Roles(Rol.ADMIN)
+  async quitarServicio(
+    @Param('legajo', ParseIdPipe) legajo: number,
+    @Param('servicioId', ParseIdPipe) servicioId: number,
+  ) {
+    await this.profesionalesService.quitarServicio(legajo, servicioId);
+    return { message: 'Servicio quitado' };
   }
 
   /**

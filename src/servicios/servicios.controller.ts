@@ -6,11 +6,11 @@ import {
   Param,
   Patch,
   Post,
-  Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Public } from '../auth/public.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
@@ -28,16 +28,26 @@ export class ServiciosController {
   constructor(private readonly serviciosService: ServiciosService) {}
 
   /**
-   * Listar servicios
+   * Listar los servicios que ofrece el salón
    *
-   * @remarks Cualquier usuario logueado. Por defecto solo los activos;
-   * `?incluirBajas=true` (solo tiene sentido para ADMIN) muestra también los dados de baja.
+   * @remarks Público, no hace falta iniciar sesión. Solo los activos.
    * `precio` llega como texto con 2 decimales (ej. "15000.00").
    */
   @Get()
-  @ApiQuery({ name: 'incluirBajas', required: false, type: Boolean })
-  findAll(@Query('incluirBajas') incluirBajas?: string) {
-    return this.serviciosService.findAll(incluirBajas === 'true');
+  @Public()
+  findAll() {
+    return this.serviciosService.findAll();
+  }
+
+  /**
+   * Listar todos los servicios, incluidos los dados de baja (solo ADMIN)
+   *
+   * @remarks Para ver los dados de baja y reactivarlos con `PATCH /servicios/:id/alta`.
+   */
+  @Get('todos')
+  @Roles(Rol.ADMIN)
+  findTodos() {
+    return this.serviciosService.findAll(true);
   }
 
   /** Crear un servicio (solo ADMIN) */
