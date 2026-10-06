@@ -7,6 +7,7 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { Trim } from '../../auth/dto/trim.decorator';
+import { IsFecha } from '../../common/fecha-hora';
 
 export class UpdateProfileDto {
   /** @example "Martina" */
@@ -53,4 +54,12 @@ export class UpdateProfileDto {
   @IsOptional()
   @Trim()
   alergia?: string | null;
+
+  /**
+   * Fecha pasada, desde 1900. `null` la borra.
+   * @example "1995-04-23"
+   */
+  @IsFecha('La fecha de nacimiento')
+  @IsOptional()
+  fechaNacimiento?: string | null;
 }

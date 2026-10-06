@@ -6,6 +6,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { IsFecha } from '../../common/fecha-hora';
 import { HasLetterAndNumber } from './has-letter-and-number.decorator';
 import { Trim } from './trim.decorator';
 
@@ -51,6 +52,14 @@ export class RegisterDto {
   @IsOptional()
   @Trim()
   alergia?: string;
+
+  /**
+   * Opcional. Fecha pasada, desde 1900.
+   * @example "1995-04-23"
+   */
+  @IsFecha('La fecha de nacimiento')
+  @IsOptional()
+  fechaNacimiento?: string;
 
   /**
    * Entre 8 y 72 caracteres, con al menos una letra y un número.
