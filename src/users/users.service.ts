@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  StreamableFile,
 } from '@nestjs/common';
 import { Prisma, Rol, Usuario } from '../generated/prisma/client';
 import {
@@ -12,6 +13,8 @@ import {
   esFechaValida,
   fechaADate,
 } from '../common/fecha-hora';
+import { ROLES_QUE_ATIENDEN } from '../common/reglas-agenda';
+import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -41,7 +44,7 @@ const clienteResumenSelect = {
   apellido: true,
   email: true,
   telefono: true,
-  cliente: { select: { alergia: true } },
+  cliente: { select: { alergia: true, foto: true } },
 } satisfies Prisma.UsuarioSelect;
 
 export type ClienteResumen = Prisma.UsuarioGetPayload<{
@@ -50,7 +53,10 @@ export type ClienteResumen = Prisma.UsuarioGetPayload<{
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fotosService: FotosService,
+  ) {}
 
   create(data: Prisma.UsuarioCreateInput): Promise<UsuarioConPerfil> {
     return this.prisma.usuario.create({ data, include: perfilInclude });
@@ -245,6 +251,93 @@ export class UsersService {
       include: perfilInclude,
     });
     return this.toPublic(updated);
+  }
+
+  // Replaces the photo of the actor's profile; the old file is removed afterwards.
+  async cambiarFoto(
+    actor: PublicUser,
+    archivo: ArchivoSubido | undefined,
+  ): Promise<PublicUser> {
+    const perfil = this.perfilConFoto(actor);
+    const nombre = await this.fotosService.guardar(archivo);
+    let updated: UsuarioConPerfil;
+    try {
+      updated = await this.prisma.usuario.update({
+        where: { id: actor.id },
+        data:
+          perfil === 'cliente'
+            ? {
+                cliente: {
+                  upsert: {
+                    create: { foto: nombre },
+                    update: { foto: nombre },
+                  },
+                },
+              }
+            : { profesional: { update: { foto: nombre } } },
+        include: perfilInclude,
+      });
+    } catch (error) {
+      await this.fotosService.borrar(nombre);
+      throw error;
+    }
+    await this.fotosService.borrar(actor[perfil]?.foto);
+    return this.toPublic(updated);
+  }
+
+  async quitarFoto(actor: PublicUser): Promise<PublicUser> {
+    const perfil = this.perfilConFoto(actor);
+    const anterior = actor[perfil]?.foto;
+    if (!anterior) {
+      throw new NotFoundException('No tenés foto de perfil');
+    }
+    const updated = await this.prisma.usuario.update({
+      where: { id: actor.id },
+      data: { [perfil]: { update: { foto: null } } },
+      include: perfilInclude,
+    });
+    await this.fotosService.borrar(anterior);
+    return this.toPublic(updated);
+  }
+
+  // The user's own photo, or any user's for the salon (PROFESIONAL / ADMIN).
+  // A client asking for someone else's gets 404, so ids don't leak.
+  async verFoto(id: number, actor: PublicUser): Promise<StreamableFile> {
+    const user =
+      actor.id === id || actor.rol !== Rol.CLIENTE
+        ? await this.findById(id)
+        : null;
+    if (!user || user.fechaBaja !== null) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+    const perfil = this.tienePerfilConFoto(user);
+    return this.fotosService.leer(perfil ? user[perfil]?.foto : null);
+  }
+
+  // Photos belong to the profile of the current role: Cliente for a CLIENTE,
+  // Profesional for whoever attends turnos. An ADMIN without legajo has none.
+  private tienePerfilConFoto(
+    user: Pick<UsuarioConPerfil, 'rol' | 'profesional'>,
+  ): 'cliente' | 'profesional' | null {
+    if (user.rol === Rol.CLIENTE) {
+      return 'cliente';
+    }
+    if (ROLES_QUE_ATIENDEN.includes(user.rol) && user.profesional) {
+      return 'profesional';
+    }
+    return null;
+  }
+
+  private perfilConFoto(
+    user: Pick<UsuarioConPerfil, 'rol' | 'profesional'>,
+  ): 'cliente' | 'profesional' {
+    const perfil = this.tienePerfilConFoto(user);
+    if (!perfil) {
+      throw new BadRequestException(
+        'Un ADMIN sin legajo no tiene foto de perfil',
+      );
+    }
+    return perfil;
   }
 
   toPublic(user: UsuarioConPerfil): PublicUser {

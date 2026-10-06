@@ -8,11 +8,16 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { ParseIdPipe } from '../common/parse-id.pipe';
+import { ApiFoto } from '../fotos/api-foto.decorator';
+import type { ArchivoSubido } from '../fotos/fotos.service';
+import { SubirFotoInterceptor } from '../fotos/subir-foto.interceptor';
 import { Rol } from '../generated/prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -66,6 +71,57 @@ export class UsersController {
   @Patch('me')
   updateMe(@Req() req: Request, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateProfile(req.user as PublicUser, dto);
+  }
+
+  /**
+   * Subir o cambiar mi foto de perfil
+   *
+   * @remarks `multipart/form-data` con la imagen en el campo `foto`: JPG, PNG o
+   * WEBP de hasta 2 MB (el tipo se controla por el contenido, no por el nombre).
+   * La de un CLIENTE va a su perfil de cliente; la de un PROFESIONAL o ADMIN con
+   * legajo, a su perfil de profesional. Reemplaza la anterior. 400 si falta, no
+   * es una imagen válida, pesa más de 2 MB o quien la sube es un ADMIN sin legajo.
+   */
+  // Declared before ':id' routes so "me" is not parsed as an id.
+  @Patch('me/foto')
+  @UseInterceptors(SubirFotoInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['foto'],
+      properties: { foto: { type: 'string', format: 'binary' } },
+    },
+  })
+  cambiarFoto(
+    @Req() req: Request,
+    @UploadedFile() archivo: ArchivoSubido | undefined,
+  ) {
+    return this.usersService.cambiarFoto(req.user as PublicUser, archivo);
+  }
+
+  /**
+   * Quitar mi foto de perfil
+   *
+   * @remarks 404 si no tenía foto.
+   */
+  @Delete('me/foto')
+  quitarFoto(@Req() req: Request) {
+    return this.usersService.quitarFoto(req.user as PublicUser);
+  }
+
+  /**
+   * Ver la foto de perfil de un usuario
+   *
+   * @remarks Devuelve la imagen. El propio usuario ve la suya; PROFESIONAL y
+   * ADMIN ven la de cualquiera (por ejemplo, la de un cliente). Para la de un
+   * profesional por legajo está `GET /profesionales/:legajo/foto`. 404 si no
+   * tiene foto o si un CLIENTE pide la de otro usuario.
+   */
+  @Get(':id/foto')
+  @ApiFoto()
+  verFoto(@Param('id', ParseIdPipe) id: number, @Req() req: Request) {
+    return this.usersService.verFoto(id, req.user as PublicUser);
   }
 
   /**
