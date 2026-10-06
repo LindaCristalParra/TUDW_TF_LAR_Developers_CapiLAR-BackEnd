@@ -79,6 +79,12 @@ Once the Prisma schema is set up, apply the migrations with:
 npx prisma migrate dev
 ```
 
+Create the first admin account (uses `ADMIN_EMAIL` and `ADMIN_PASSWORD` from `.env`; skipped if that email already exists):
+
+```bash
+npx prisma db seed
+```
+
 To browse the data locally:
 
 ```bash

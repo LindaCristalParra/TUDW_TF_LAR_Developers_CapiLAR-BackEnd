@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>¡Bienvenida/o a CapiLAR!</title>
+</head>
+<body style="margin:0; padding:0; background-color:#F4F2F2;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#F4F2F2;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:100%; max-width:600px; background-color:#FFFFFF; border:1px solid #E3DEDE; border-radius:8px; overflow:hidden;">
+
+          <!-- Barra degradé -->
+          <tr>
+            <td height="6" style="height:6px; line-height:6px; font-size:0; background-color:#A35FDA; background-image:linear-gradient(90deg, #A35FDA, #F98D56);">&nbsp;</td>
+          </tr>
+
+          <!-- Logo -->
+          <tr>
+            <td align="center" style="padding:32px 48px 16px 48px; font-family:'Montserrat', Arial, sans-serif; font-size:40px; font-weight:300; line-height:48px;">
+              <span style="color:#1E1E1E;">Capi</span><span style="color:#737373;">LAR</span>
+            </td>
+          </tr>
+
+          <!-- Contenido -->
+          <tr>
+            <td style="padding:16px 48px 40px 48px; font-family:'Montserrat', Arial, sans-serif;">
+              <h1 style="margin:0 0 20px 0; font-size:26px; font-weight:600; line-height:32px; color:#1E1E1E;">¡Tu cuenta está lista!</h1>
+              <p style="margin:0 0 20px 0; font-size:16px; font-weight:500; line-height:20px; color:#1E1E1E;">Hola {{nombre}},</p>
+              <p style="margin:0 0 20px 0; font-size:15px; line-height:23px; color:#3A3A3A;">Te registraste con éxito en CapiLAR. Ya podés iniciar sesión para reservar turnos, completar tu perfil y seguir la evolución de tu cabello.</p>
+
+              <!-- Botón -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td align="center" style="padding:8px 0 28px 0;">
+                    <a href="{{link}}" target="_blank" style="display:inline-block; padding:16px 32px; border-radius:4px; background-color:#A35FDA; background-image:linear-gradient(90deg, #A35FDA, #F98D56); font-family:'Inter', Arial, sans-serif; font-size:16px; font-weight:500; letter-spacing:0.3px; color:#000000; text-decoration:none;">INICIAR SESIÓN</a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 20px 0; font-size:14px; line-height:21px; color:#737373;">Si no creaste esta cuenta, escribinos respondiendo este mail.</p>
+
+              <!-- Divisor -->
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="border-top:1px solid #E3DEDE; font-size:0; line-height:0;">&nbsp;</td>
+                </tr>
+              </table>
+
+              <p style="margin:20px 0 8px 0; font-size:13px; line-height:20px; color:#737373;">¿El botón no funciona? Copiá y pegá este enlace en tu navegador:</p>
+              <p style="margin:0; font-size:13px; font-weight:500; line-height:18px; word-break:break-all;"><a href="{{link}}" target="_blank" style="color:#8F54F9; text-decoration:none;">{{link}}</a></p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td align="center" style="padding:20px 48px; background-color:#737373; font-family:'Montserrat', Arial, sans-serif; font-size:13px; font-weight:500; line-height:18px; color:#FFFFFF;">
+              © 2026 capiLAR. Desarrollado en Neuquén.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

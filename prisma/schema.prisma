@@ -19,11 +19,29 @@ model Usuario {
   nombre           String
   apellido         String
   email            String    @unique
-  telefono         String?
+  telefono         String
   contrasena       String
   rol              Rol
   fechaAlta        DateTime  @default(now())
   fechaBaja        DateTime?
   resetToken       String?
   resetTokenExpira DateTime?
+
+  cliente     Cliente?
+  profesional Profesional?
+}
+
+// Subtypes of Usuario (DER). They share the user's lifecycle, so no fechaBaja of their own.
+model Cliente {
+  usuarioId Int     @id
+  alergia   String? @db.VarChar(255)
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+}
+
+model Profesional {
+  legajo    Int @id @default(autoincrement())
+  usuarioId Int @unique
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
 }
