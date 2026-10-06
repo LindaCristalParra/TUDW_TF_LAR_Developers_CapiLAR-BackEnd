@@ -63,6 +63,8 @@ export interface ContextoAgenda {
   ocupados: Tramo[];
   // the client's own turnos that day (whole windows), if a client is given
   turnosDelCliente: { inicio: number; fin: number }[];
+  // true when the client books for themselves (changes the overlap message)
+  reservaElCliente: boolean;
 }
 
 /** Validates services and professionals and returns them in order. */
@@ -178,7 +180,11 @@ export async function cargarContexto(
   db: Db,
   fecha: string,
   items: ItemTurno[],
-  opciones: { excluirTurnoId?: number; clienteId?: number } = {},
+  opciones: {
+    excluirTurnoId?: number;
+    clienteId?: number;
+    reservaElCliente?: boolean;
+  } = {},
 ): Promise<ContextoAgenda> {
   validarFecha(fecha);
   const resueltos = await resolverItems(db, items);
@@ -262,6 +268,7 @@ export async function cargarContexto(
       inicio: aMinutos(t.horaInicio),
       fin: aMinutos(t.horaFin),
     })),
+    reservaElCliente: opciones.reservaElCliente ?? false,
   };
 }
 
@@ -288,7 +295,9 @@ export function motivoNoDisponible(
       seSuperponen(inicioTurno, finTurno, t.inicio, t.fin),
     )
   ) {
-    return 'Ya tenés otro turno en ese horario';
+    return ctx.reservaElCliente
+      ? 'Ya tenés otro turno en ese horario'
+      : 'El cliente ya tiene otro turno en ese horario';
   }
 
   let inicio = inicioTurno;

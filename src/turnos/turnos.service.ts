@@ -87,9 +87,32 @@ export class TurnosService {
     private readonly mailService: MailService,
   ) {}
 
+  // turnoId (rescheduling) and clienteId (booking for a client) are for the salon only.
   async horariosLibres(dto: HorariosLibresDto, actor: PublicUser) {
+    const esCliente = actor.rol === Rol.CLIENTE;
+    if (esCliente && (dto.turnoId || dto.clienteId)) {
+      throw new ForbiddenException(
+        'Solo el salón puede consultar horarios para otro turno o cliente',
+      );
+    }
+    if (dto.turnoId && dto.clienteId) {
+      throw new BadRequestException(
+        'Mandá el turno (turnoId) o el cliente (clienteId), no los dos',
+      );
+    }
+
+    let clienteId = esCliente ? actor.id : dto.clienteId;
+    if (dto.turnoId) {
+      const turno = await this.findParaGestionar(dto.turnoId, actor);
+      clienteId = turno.clienteId;
+    } else if (dto.clienteId) {
+      await this.assertClienteActivo(dto.clienteId);
+    }
+
     const ctx = await cargarContexto(this.prisma, dto.fecha, dto.items, {
-      clienteId: actor.rol === Rol.CLIENTE ? actor.id : undefined,
+      excluirTurnoId: dto.turnoId,
+      clienteId,
+      reservaElCliente: esCliente,
     });
     return {
       fecha: dto.fecha,
@@ -112,7 +135,10 @@ export class TurnosService {
     }
 
     const turno = await this.enTransaccion(async (tx) => {
-      const ctx = await cargarContexto(tx, dto.fecha, dto.items, { clienteId });
+      const ctx = await cargarContexto(tx, dto.fecha, dto.items, {
+        clienteId,
+        reservaElCliente: esCliente,
+      });
       assertDisponible(ctx, dto.horaInicio);
       return tx.turno.create({
         data: {
