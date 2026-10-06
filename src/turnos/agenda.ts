@@ -85,6 +85,13 @@ export async function resolverItems(
       usuario: { select: { nombre: true, apellido: true } },
     },
   });
+  const asignados = await db.profesionalServicio.findMany({
+    where: {
+      profesionalId: { in: legajos },
+      servicioId: { in: servicioIds },
+      fechaBaja: null,
+    },
+  });
 
   return items.map((item) => {
     const servicio = servicios.find((s) => s.id === item.servicioId);
@@ -95,10 +102,21 @@ export async function resolverItems(
     if (!profesional) {
       throw new NotFoundException(`Profesional ${item.legajo} no encontrado`);
     }
+    const nombre = `${profesional.usuario.nombre} ${profesional.usuario.apellido}`;
+    if (
+      !asignados.some(
+        (a) =>
+          a.profesionalId === item.legajo && a.servicioId === item.servicioId,
+      )
+    ) {
+      throw new BadRequestException(
+        `${nombre} no realiza el servicio ${servicio.tipo}`,
+      );
+    }
     return {
       ...item,
       tipo: servicio.tipo,
-      profesional: `${profesional.usuario.nombre} ${profesional.usuario.apellido}`,
+      profesional: nombre,
       duracion: servicio.tiempoDuracion,
       precio: servicio.precio,
     };

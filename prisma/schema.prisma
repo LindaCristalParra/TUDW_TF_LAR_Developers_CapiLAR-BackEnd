@@ -64,6 +64,7 @@ model Profesional {
   usuarioId Int @unique
 
   usuario         Usuario                 @relation(fields: [usuarioId], references: [id])
+  servicios       ProfesionalServicio[]
   disponibilidad  DisponibilidadHoraria[]
   bloqueos        BloqueoAgenda[]
   detallesDeTurno TurnoDetalle[]
@@ -80,7 +81,21 @@ model Servicio {
   precio         Decimal   @db.Decimal(10, 2)
   fechaBaja      DateTime?
 
+  profesionales   ProfesionalServicio[]
   detallesDeTurno TurnoDetalle[]
+}
+
+// Services a professional can do. Removing one sets fechaBaja; assigning it again clears it.
+model ProfesionalServicio {
+  profesionalId Int
+  servicioId    Int
+  fechaBaja     DateTime?
+
+  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
+  servicio    Servicio    @relation(fields: [servicioId], references: [id])
+
+  @@id([profesionalId, servicioId])
+  @@index([servicioId])
 }
 
 // Weekly working hours of a professional.
@@ -114,15 +129,15 @@ model BloqueoAgenda {
 
 // A cancelled turno keeps its row with estado CANCELADO (logical delete).
 model Turno {
-  id            Int         @id @default(autoincrement())
-  clienteId     Int
-  fecha         DateTime    @db.Date
-  horaInicio    String      @db.Char(5)
-  horaFin       String      @db.Char(5)
-  metodoPago    MetodoPago?
-  estado        EstadoTurno @default(PENDIENTE)
+  id         Int         @id @default(autoincrement())
+  clienteId  Int
+  fecha      DateTime    @db.Date
+  horaInicio String      @db.Char(5)
+  horaFin    String      @db.Char(5)
+  metodoPago MetodoPago?
+  estado     EstadoTurno @default(PENDIENTE)
   // Why it was rejected (internal, not shown to the client) or canceled (shown to both sides).
-  motivo        String?     @db.VarChar(500)
+  motivo     String?     @db.VarChar(500)
 
   cliente  Cliente        @relation(fields: [clienteId], references: [usuarioId])
   detalles TurnoDetalle[]

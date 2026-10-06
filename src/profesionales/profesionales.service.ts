@@ -9,6 +9,7 @@ import {
   BloqueoAgenda,
   DisponibilidadHoraria,
   Rol,
+  Servicio,
 } from '../generated/prisma/client';
 import {
   aMinutos,
@@ -35,9 +36,21 @@ export class ProfesionalesService {
   constructor(private readonly prisma: PrismaService) {}
 
   // Active professionals, for clients to choose who to book with.
-  async findAll(): Promise<ProfesionalResumen[]> {
+  // With servicioId, only the ones who do that service.
+  async findAll(servicioId?: number): Promise<ProfesionalResumen[]> {
     const profesionales = await this.prisma.profesional.findMany({
-      where: { usuario: { rol: Rol.PROFESIONAL, fechaBaja: null } },
+      where: {
+        usuario: { rol: Rol.PROFESIONAL, fechaBaja: null },
+        servicios: servicioId
+          ? {
+              some: {
+                servicioId,
+                fechaBaja: null,
+                servicio: { fechaBaja: null },
+              },
+            }
+          : undefined,
+      },
       select: {
         legajo: true,
         usuario: { select: { nombre: true, apellido: true } },
@@ -65,6 +78,56 @@ export class ProfesionalesService {
       profesional.usuario.fechaBaja !== null
     ) {
       throw new NotFoundException('Profesional no encontrado');
+    }
+  }
+
+  // Active services the professional does.
+  findServicios(legajo: number): Promise<Servicio[]> {
+    return this.prisma.servicio.findMany({
+      where: {
+        fechaBaja: null,
+        profesionales: { some: { profesionalId: legajo, fechaBaja: null } },
+      },
+      orderBy: { tipo: 'asc' },
+    });
+  }
+
+  // Assigning a service that was removed before clears its fechaBaja.
+  async asignarServicio(legajo: number, servicioId: number): Promise<Servicio> {
+    await this.assertActivo(legajo);
+    const servicio = await this.prisma.servicio.findFirst({
+      where: { id: servicioId, fechaBaja: null },
+    });
+    if (!servicio) {
+      throw new NotFoundException('Servicio no encontrado');
+    }
+
+    const asignado = await this.prisma.profesionalServicio.findUnique({
+      where: {
+        profesionalId_servicioId: { profesionalId: legajo, servicioId },
+      },
+    });
+    if (asignado && asignado.fechaBaja === null) {
+      throw new ConflictException('El profesional ya tiene ese servicio');
+    }
+    await this.prisma.profesionalServicio.upsert({
+      where: {
+        profesionalId_servicioId: { profesionalId: legajo, servicioId },
+      },
+      create: { profesionalId: legajo, servicioId },
+      update: { fechaBaja: null },
+    });
+    return servicio;
+  }
+
+  // Logical delete (ARQ-01). Turnos already booked with that service are kept.
+  async quitarServicio(legajo: number, servicioId: number): Promise<void> {
+    const result = await this.prisma.profesionalServicio.updateMany({
+      where: { profesionalId: legajo, servicioId, fechaBaja: null },
+      data: { fechaBaja: new Date() },
+    });
+    if (result.count === 0) {
+      throw new NotFoundException('El profesional no tiene ese servicio');
     }
   }
 
