@@ -102,15 +102,15 @@ model ProfesionalServicio {
 model DisponibilidadHoraria {
   id            Int       @id @default(autoincrement())
   profesionalId Int
-  // 0 = domingo ... 6 = sábado.
-  diaSemana     Int
+  // Working hours of one specific date (not a weekly template).
+  fecha         DateTime  @db.Date
   horarioInicio String    @db.Char(5)
   horarioFin    String    @db.Char(5)
   fechaBaja     DateTime?
 
   profesional Profesional @relation(fields: [profesionalId], references: [legajo])
 
-  @@index([profesionalId, diaSemana])
+  @@index([profesionalId, fecha])
 }
 
 // Time off of a professional. Date-times are local wall-clock times stored as-is.

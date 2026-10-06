@@ -16,6 +16,7 @@ import { Rol } from '../generated/prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { ListClientesQueryDto } from './dto/list-clientes-query.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
@@ -40,6 +41,19 @@ export class UsersController {
   @Roles(Rol.ADMIN)
   findAll(@Query() query: ListUsersQueryDto) {
     return this.usersService.findAll(query);
+  }
+
+  /**
+   * Buscar clientes (PROFESIONAL o ADMIN)
+   *
+   * @remarks Para elegir el cliente al cargar un turno a su nombre. Solo clientes
+   * activos, ordenados por apellido y nombre, con `id`, `nombre`, `apellido`,
+   * `email`, `telefono` y `cliente.alergia`.
+   */
+  @Get('clientes')
+  @Roles(Rol.PROFESIONAL, Rol.ADMIN)
+  findClientes(@Query() query: ListClientesQueryDto) {
+    return this.usersService.findClientes(query.search);
   }
 
   /**

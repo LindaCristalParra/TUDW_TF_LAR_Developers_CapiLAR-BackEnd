@@ -42,6 +42,9 @@ export class TurnosController {
    * lista de servicios, cada uno con su profesional, hechos uno después del
    * otro. Tiene en cuenta la disponibilidad, los bloqueos, los turnos tomados
    * y la anticipación (mín. 1 hora, máx. 60 días). Cualquier usuario logueado.
+   * PROFESIONAL o ADMIN pueden mandar `turnoId` al reprogramar (su horario
+   * actual cuenta como libre) o `clienteId` al cargar un turno para un cliente;
+   * en los dos casos se tienen en cuenta los otros turnos de ese cliente.
    */
   @Post('horarios-libres')
   @HttpCode(HttpStatus.OK)

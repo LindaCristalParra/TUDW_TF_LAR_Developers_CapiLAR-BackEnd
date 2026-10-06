@@ -25,6 +25,20 @@ export type PublicUser = Omit<
   'contrasena' | 'resetToken' | 'resetTokenExpira'
 >;
 
+// What the salon needs to pick a client when booking: no role, dates or tokens.
+const clienteResumenSelect = {
+  id: true,
+  nombre: true,
+  apellido: true,
+  email: true,
+  telefono: true,
+  cliente: { select: { alergia: true } },
+} satisfies Prisma.UsuarioSelect;
+
+export type ClienteResumen = Prisma.UsuarioGetPayload<{
+  select: typeof clienteResumenSelect;
+}>;
+
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
@@ -96,6 +110,25 @@ export class UsersService {
       include: perfilInclude,
     });
     return users.map((user) => this.toPublic(user));
+  }
+
+  // Active clients, for PROFESIONAL / ADMIN to book a turno on their behalf.
+  findClientes(search?: string): Promise<ClienteResumen[]> {
+    return this.prisma.usuario.findMany({
+      where: {
+        rol: Rol.CLIENTE,
+        fechaBaja: null,
+        OR: search
+          ? [
+              { nombre: { contains: search } },
+              { apellido: { contains: search } },
+              { email: { contains: search } },
+            ]
+          : undefined,
+      },
+      orderBy: [{ apellido: 'asc' }, { nombre: 'asc' }],
+      select: clienteResumenSelect,
+    });
   }
 
   // F02: role change. The current role (Usuario.rol) is the "estado del rol" F02 asks for.

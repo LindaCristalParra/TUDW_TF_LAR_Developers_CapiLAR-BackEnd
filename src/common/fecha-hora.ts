@@ -16,9 +16,11 @@ export function IsHora(campo: string): PropertyDecorator {
   });
 }
 
-export function IsFecha(campo: string): PropertyDecorator {
+// With each = true it checks every item of a list.
+export function IsFecha(campo: string, each = false): PropertyDecorator {
   return Matches(FECHA_REGEX, {
-    message: `${campo} debe tener el formato YYYY-MM-DD (ej. 2026-10-07)`,
+    each,
+    message: `${campo} debe${each ? 'n' : ''} tener el formato YYYY-MM-DD (ej. 2026-10-07)`,
   });
 }
 
@@ -56,9 +58,10 @@ export function dateAFecha(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
-/** 0 = domingo ... 6 = sábado, for a "YYYY-MM-DD" date. */
-export function diaSemana(fecha: string): number {
-  return fechaADate(fecha).getUTCDay();
+/** "2026-10-07" -> "07/10/2026", for messages. */
+export function fechaCorta(fecha: string): string {
+  const [anio, mes, dia] = fecha.split('-');
+  return `${dia}/${mes}/${anio}`;
 }
 
 /** A "YYYY-MM-DD" string that is a real calendar date (rejects 2026-02-30). */

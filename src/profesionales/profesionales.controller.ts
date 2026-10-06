@@ -15,12 +15,15 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { fechaCorta } from '../common/fecha-hora';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import { PublicUser } from '../users/users.service';
 import { AsignarServicioDto } from './dto/asignar-servicio.dto';
 import { CreateBloqueoDto } from './dto/create-bloqueo.dto';
 import { CreateDisponibilidadDto } from './dto/create-disponibilidad.dto';
+import { DisponibilidadQueryDto } from './dto/disponibilidad-query.dto';
+import { FechaQueryDto } from './dto/fecha-query.dto';
 import { ListProfesionalesQueryDto } from './dto/list-profesionales-query.dto';
 import { ProfesionalesService } from './profesionales.service';
 
@@ -88,22 +91,32 @@ export class ProfesionalesController {
   }
 
   /**
-   * Ver la disponibilidad semanal de un profesional
+   * Ver los horarios de trabajo de un profesional en un período
    *
-   * @remarks Horarios de trabajo por día (0 = domingo ... 6 = sábado). Cualquier usuario logueado.
+   * @remarks Horarios por fecha entre `desde` y `hasta` (incluidas, máx. 31 días),
+   * ordenados por fecha y hora. Cualquier usuario logueado.
    */
   @Get(':legajo/disponibilidad')
-  async findDisponibilidad(@Param('legajo', ParseIdPipe) legajo: number) {
+  async findDisponibilidad(
+    @Param('legajo', ParseIdPipe) legajo: number,
+    @Query() query: DisponibilidadQueryDto,
+  ) {
     await this.profesionalesService.assertActivo(legajo);
-    return this.profesionalesService.findDisponibilidad(legajo);
+    return this.profesionalesService.findDisponibilidad(
+      legajo,
+      query.desde,
+      query.hasta,
+    );
   }
 
   /**
-   * Cargar un horario de trabajo (el propio profesional o ADMIN)
+   * Cargar un horario de trabajo en una o varias fechas (el propio profesional o ADMIN)
    *
-   * @remarks 400 si el inicio no es anterior al fin o si la jornada de ese día
-   * supera las 12 horas; 409 si se superpone con otro horario del mismo día;
-   * 403 si un profesional intenta cargar la agenda de otro.
+   * @remarks El mismo horario en cada fecha de la lista (hasta 31). Se guardan
+   * todas o ninguna. 400 si el inicio no es anterior al fin, si una fecha ya pasó
+   * o está a más de 60 días, o si la jornada de una fecha supera las 12 horas;
+   * 409 si se superpone con otro horario de esa fecha; 403 si un profesional
+   * intenta cargar la agenda de otro.
    */
   @Post(':legajo/disponibilidad')
   createDisponibilidad(
@@ -119,9 +132,33 @@ export class ProfesionalesController {
   }
 
   /**
+   * Quitar todos los horarios de una fecha (el propio profesional o ADMIN)
+   *
+   * @remarks Borrado lógico. 409 si hay turnos reservados ese día; 400 si la
+   * fecha ya pasó; 404 si no había horarios cargados.
+   */
+  @Delete(':legajo/disponibilidad')
+  async deactivateDisponibilidadDeFecha(
+    @Param('legajo', ParseIdPipe) legajo: number,
+    @Query() query: FechaQueryDto,
+    @Req() req: Request,
+  ) {
+    const cantidad =
+      await this.profesionalesService.deactivateDisponibilidadDeFecha(
+        legajo,
+        query.fecha,
+        req.user as PublicUser,
+      );
+    return {
+      message: `Se ${cantidad === 1 ? 'quitó 1 horario' : `quitaron ${cantidad} horarios`} del ${fechaCorta(query.fecha)}`,
+    };
+  }
+
+  /**
    * Quitar un horario de trabajo (el propio profesional o ADMIN)
    *
-   * @remarks Borrado lógico. Los turnos ya reservados no se tocan.
+   * @remarks Borrado lógico. 409 si hay turnos reservados dentro de ese
+   * horario; 400 si la fecha ya pasó.
    */
   @Delete(':legajo/disponibilidad/:id')
   async deactivateDisponibilidad(
