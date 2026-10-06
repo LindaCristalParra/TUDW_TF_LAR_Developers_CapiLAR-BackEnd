@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProfesionalesModule } from './profesionales/profesionales.module';
 import { ServiciosModule } from './servicios/servicios.module';
+import { TurnosModule } from './turnos/turnos.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { ServiciosModule } from './servicios/servicios.module';
     AuthModule,
     ServiciosModule,
     ProfesionalesModule,
+    TurnosModule,
   ],
   controllers: [AppController],
   providers: [AppService],
