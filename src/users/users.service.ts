@@ -1,6 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import { Prisma, Usuario } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 // Subtype rows (DER: Cliente / Profesional) loaded with the user.
 const perfilInclude = {
@@ -37,6 +42,35 @@ export class UsersService {
       where: { id },
       include: perfilInclude,
     });
+  }
+
+  async updateProfile(
+    user: PublicUser,
+    dto: UpdateProfileDto,
+  ): Promise<PublicUser> {
+    const email = dto.email?.toLowerCase();
+    if (email && email !== user.email && (await this.findByEmail(email))) {
+      throw new ConflictException('El email ya está registrado');
+    }
+    if (dto.alergia !== undefined && !user.cliente) {
+      throw new BadRequestException('Solo los clientes pueden cargar alergias');
+    }
+
+    const updated = await this.prisma.usuario.update({
+      where: { id: user.id },
+      data: {
+        nombre: dto.nombre,
+        apellido: dto.apellido,
+        email,
+        telefono: dto.telefono,
+        cliente:
+          dto.alergia === undefined
+            ? undefined
+            : { update: { alergia: dto.alergia || null } },
+      },
+      include: perfilInclude,
+    });
+    return this.toPublic(updated);
   }
 
   toPublic(user: UsuarioConPerfil): PublicUser {
