@@ -91,6 +91,19 @@ export class UsersController {
   }
 
   /**
+   * Dar de alta a un usuario dado de baja (solo ADMIN)
+   *
+   * @remarks Vuelve `fechaBaja` a `null`: la cuenta puede iniciar sesión otra
+   * vez, con la misma contraseña y el mismo rol. Devuelve el usuario.
+   * 404 si no existe; 400 si ya está activo.
+   */
+  @Patch(':id/alta')
+  @Roles(Rol.ADMIN)
+  reactivate(@Param('id', ParseIdPipe) id: number) {
+    return this.usersService.reactivate(id);
+  }
+
+  /**
    * Dar de baja a un usuario (solo ADMIN)
    *
    * @remarks Borrado lógico, igual que `DELETE /users/me`. 403 si el ADMIN intenta

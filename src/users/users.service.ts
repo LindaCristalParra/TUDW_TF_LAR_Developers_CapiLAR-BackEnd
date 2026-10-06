@@ -156,6 +156,24 @@ export class UsersService {
     });
   }
 
+  // Undoes a logical delete: the user can log in again with the same account.
+  async reactivate(id: number): Promise<PublicUser> {
+    const user = await this.findById(id);
+    if (!user) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+    if (user.fechaBaja === null) {
+      throw new BadRequestException('El usuario ya está activo');
+    }
+
+    const updated = await this.prisma.usuario.update({
+      where: { id },
+      data: { fechaBaja: null },
+      include: perfilInclude,
+    });
+    return this.toPublic(updated);
+  }
+
   toPublic(user: UsuarioConPerfil): PublicUser {
     const {
       contrasena: _contrasena,
