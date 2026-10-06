@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, Rol, Usuario } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
 // Subtype rows (DER: Cliente / Profesional) loaded with the user.
@@ -54,10 +55,12 @@ export class UsersService {
     if (email && email !== user.email && (await this.findByEmail(email))) {
       throw new ConflictException('El email ya está registrado');
     }
-    if (dto.alergia !== undefined && !user.cliente) {
+    // By role, not by the Cliente row: that row is kept when a client is promoted.
+    if (dto.alergia !== undefined && user.rol !== Rol.CLIENTE) {
       throw new BadRequestException('Solo los clientes pueden cargar alergias');
     }
 
+    const alergia = dto.alergia || null;
     const updated = await this.prisma.usuario.update({
       where: { id: user.id },
       data: {
@@ -68,7 +71,64 @@ export class UsersService {
         cliente:
           dto.alergia === undefined
             ? undefined
-            : { update: { alergia: dto.alergia || null } },
+            : { upsert: { create: { alergia }, update: { alergia } } },
+      },
+      include: perfilInclude,
+    });
+    return this.toPublic(updated);
+  }
+
+  // F02: user list for admins.
+  async findAll(query: ListUsersQueryDto): Promise<PublicUser[]> {
+    const users = await this.prisma.usuario.findMany({
+      where: {
+        rol: query.rol,
+        fechaBaja: query.incluirBajas ? undefined : null,
+        OR: query.search
+          ? [
+              { nombre: { contains: query.search } },
+              { apellido: { contains: query.search } },
+              { email: { contains: query.search } },
+            ]
+          : undefined,
+      },
+      orderBy: [{ apellido: 'asc' }, { nombre: 'asc' }],
+      include: perfilInclude,
+    });
+    return users.map((user) => this.toPublic(user));
+  }
+
+  // F02: role change. The current role (Usuario.rol) is the "estado del rol" F02 asks for.
+  async changeRol(
+    id: number,
+    rol: Rol,
+    actor: PublicUser,
+  ): Promise<PublicUser> {
+    // An admin can't change their own role, so there is always at least one admin.
+    if (id === actor.id) {
+      throw new ForbiddenException('No podés cambiar tu propio rol');
+    }
+
+    const user = await this.findById(id);
+    if (!user || user.fechaBaja !== null) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+    if (user.rol === rol) {
+      throw new BadRequestException(`El usuario ya tiene el rol ${rol}`);
+    }
+
+    const updated = await this.prisma.usuario.update({
+      where: { id },
+      data: {
+        rol,
+        // Subtype rows are created when missing and never deleted (ARQ-01):
+        // a professional demoted and promoted again keeps the same legajo.
+        profesional:
+          rol === Rol.PROFESIONAL && !user.profesional
+            ? { create: {} }
+            : undefined,
+        cliente:
+          rol === Rol.CLIENTE && !user.cliente ? { create: {} } : undefined,
       },
       include: perfilInclude,
     });
