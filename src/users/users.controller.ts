@@ -1,11 +1,9 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
   Get,
   Param,
-  ParseIntPipe,
   Patch,
   Query,
   Req,
@@ -13,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
+import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -21,11 +20,6 @@ import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
 import { PublicUser, UsersService } from './users.service';
-
-// Route ids must be integers; the default ParseIntPipe message is in English.
-const ParseIdPipe = new ParseIntPipe({
-  exceptionFactory: () => new BadRequestException('El id debe ser un número'),
-});
 
 // The /** */ comments on each route are the Swagger summary and description
 // (introspectComments in nest-cli.json).
