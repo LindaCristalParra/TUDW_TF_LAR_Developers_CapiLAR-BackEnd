@@ -20,12 +20,18 @@ export class ServiciosService {
   }
 
   create(dto: CreateServicioDto): Promise<Servicio> {
-    return this.prisma.servicio.create({ data: dto });
+    return this.prisma.servicio.create({
+      data: { ...dto, descripcion: dto.descripcion || null },
+    });
   }
 
   async update(id: number, dto: UpdateServicioDto): Promise<Servicio> {
     await this.findActivo(id);
-    return this.prisma.servicio.update({ where: { id }, data: dto });
+    const data =
+      dto.descripcion === undefined
+        ? dto
+        : { ...dto, descripcion: dto.descripcion || null };
+    return this.prisma.servicio.update({ where: { id }, data });
   }
 
   // Logical delete (ARQ-01): past turnos keep pointing to the service.

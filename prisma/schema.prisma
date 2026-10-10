@@ -81,6 +81,7 @@ model Profesional {
 model Servicio {
   id             Int       @id @default(autoincrement())
   tipo           String    @db.VarChar(100)
+  descripcion    String?   @db.VarChar(500)
   // Minutes.
   tiempoDuracion Int
   precio         Decimal   @db.Decimal(10, 2)
