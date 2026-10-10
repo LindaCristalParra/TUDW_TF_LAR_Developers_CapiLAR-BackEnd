@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  StreamableFile,
 } from '@nestjs/common';
 import {
   BloqueoAgenda,
@@ -22,6 +23,7 @@ import {
   seSuperponen,
 } from '../common/fecha-hora';
 import { MAX_JORNADA } from '../common/reglas-agenda';
+import { FotosService } from '../fotos/fotos.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   ESTADOS_OCUPAN,
@@ -39,6 +41,8 @@ export interface ProfesionalResumen {
   legajo: number;
   nombre: string;
   apellido: string;
+  // The photo itself is at GET /profesionales/:legajo/foto (login required).
+  tieneFoto: boolean;
 }
 
 /** Working hours of one date. */
@@ -52,7 +56,10 @@ export interface HorarioDeTrabajo {
 
 @Injectable()
 export class ProfesionalesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fotosService: FotosService,
+  ) {}
 
   // Active professionals, for clients to choose who to book with.
   // With servicioId, only the ones who do that service.
@@ -72,6 +79,7 @@ export class ProfesionalesService {
       },
       select: {
         legajo: true,
+        foto: true,
         usuario: { select: { nombre: true, apellido: true } },
       },
       orderBy: [
@@ -79,10 +87,21 @@ export class ProfesionalesService {
         { usuario: { nombre: 'asc' } },
       ],
     });
-    return profesionales.map(({ legajo, usuario }) => ({
+    return profesionales.map(({ legajo, foto, usuario }) => ({
       legajo,
       ...usuario,
+      tieneFoto: foto !== null,
     }));
+  }
+
+  // Any logged-in user can see the photo of someone they can book with.
+  async verFoto(legajo: number): Promise<StreamableFile> {
+    await this.assertActivo(legajo);
+    const profesional = await this.prisma.profesional.findUnique({
+      where: { legajo },
+      select: { foto: true },
+    });
+    return this.fotosService.leer(profesional?.foto);
   }
 
   /** 404 unless the legajo belongs to an active user whose current role is PROFESIONAL. */

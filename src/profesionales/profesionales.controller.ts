@@ -17,6 +17,7 @@ import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { fechaCorta } from '../common/fecha-hora';
 import { ParseIdPipe } from '../common/parse-id.pipe';
+import { ApiFoto } from '../fotos/api-foto.decorator';
 import { Rol } from '../generated/prisma/client';
 import { PublicUser } from '../users/users.service';
 import { AsignarServicioDto } from './dto/asignar-servicio.dto';
@@ -46,6 +47,18 @@ export class ProfesionalesController {
   @Public()
   findAll(@Query() query: ListProfesionalesQueryDto) {
     return this.profesionalesService.findAll(query.servicioId);
+  }
+
+  /**
+   * Ver la foto de perfil de un profesional
+   *
+   * @remarks Devuelve la imagen. Cualquier usuario logueado. 404 si no tiene
+   * foto (`tieneFoto` en `GET /profesionales`).
+   */
+  @Get(':legajo/foto')
+  @ApiFoto()
+  verFoto(@Param('legajo', ParseIdPipe) legajo: number) {
+    return this.profesionalesService.verFoto(legajo);
   }
 
   /**

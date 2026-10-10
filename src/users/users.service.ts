@@ -4,8 +4,16 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  StreamableFile,
 } from '@nestjs/common';
 import { Prisma, Rol, Usuario } from '../generated/prisma/client';
+import {
+  ahoraEnSalon,
+  dateAFecha,
+  esFechaValida,
+  fechaADate,
+} from '../common/fecha-hora';
+import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -20,10 +28,13 @@ export type UsuarioConPerfil = Prisma.UsuarioGetPayload<{
   include: typeof perfilInclude;
 }>;
 
+// fechaNacimiento travels as "YYYY-MM-DD" (or null), like the other dates of the API.
 export type PublicUser = Omit<
   UsuarioConPerfil,
-  'contrasena' | 'resetToken' | 'resetTokenExpira'
->;
+  'contrasena' | 'resetToken' | 'resetTokenExpira' | 'fechaNacimiento'
+> & { fechaNacimiento: string | null };
+
+const FECHA_NACIMIENTO_MINIMA = '1900-01-01';
 
 // What the salon needs to pick a client when booking: no role, dates or tokens.
 const clienteResumenSelect = {
@@ -32,7 +43,7 @@ const clienteResumenSelect = {
   apellido: true,
   email: true,
   telefono: true,
-  cliente: { select: { alergia: true } },
+  cliente: { select: { alergia: true, foto: true } },
 } satisfies Prisma.UsuarioSelect;
 
 export type ClienteResumen = Prisma.UsuarioGetPayload<{
@@ -41,7 +52,10 @@ export type ClienteResumen = Prisma.UsuarioGetPayload<{
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fotosService: FotosService,
+  ) {}
 
   create(data: Prisma.UsuarioCreateInput): Promise<UsuarioConPerfil> {
     return this.prisma.usuario.create({ data, include: perfilInclude });
@@ -82,6 +96,11 @@ export class UsersService {
         apellido: dto.apellido,
         email,
         telefono: dto.telefono,
+        // undefined keeps it, null clears it.
+        fechaNacimiento:
+          dto.fechaNacimiento === undefined || dto.fechaNacimiento === null
+            ? dto.fechaNacimiento
+            : this.fechaNacimientoADate(dto.fechaNacimiento),
         cliente:
           dto.alergia === undefined
             ? undefined
@@ -207,14 +226,121 @@ export class UsersService {
     return this.toPublic(updated);
   }
 
+  // Replaces the photo of the actor's profile; the old file is removed afterwards.
+  async cambiarFoto(
+    actor: PublicUser,
+    archivo: ArchivoSubido | undefined,
+  ): Promise<PublicUser> {
+    const perfil = this.perfilConFoto(actor);
+    const nombre = await this.fotosService.guardar(archivo);
+    let updated: UsuarioConPerfil;
+    try {
+      updated = await this.prisma.usuario.update({
+        where: { id: actor.id },
+        data:
+          perfil === 'cliente'
+            ? {
+                cliente: {
+                  upsert: {
+                    create: { foto: nombre },
+                    update: { foto: nombre },
+                  },
+                },
+              }
+            : { profesional: { update: { foto: nombre } } },
+        include: perfilInclude,
+      });
+    } catch (error) {
+      await this.fotosService.borrar(nombre);
+      throw error;
+    }
+    await this.fotosService.borrar(actor[perfil]?.foto);
+    return this.toPublic(updated);
+  }
+
+  async quitarFoto(actor: PublicUser): Promise<PublicUser> {
+    const perfil = this.perfilConFoto(actor);
+    const anterior = actor[perfil]?.foto;
+    if (!anterior) {
+      throw new NotFoundException('No tenés foto de perfil');
+    }
+    const updated = await this.prisma.usuario.update({
+      where: { id: actor.id },
+      data: { [perfil]: { update: { foto: null } } },
+      include: perfilInclude,
+    });
+    await this.fotosService.borrar(anterior);
+    return this.toPublic(updated);
+  }
+
+  // The user's own photo, or any user's for the salon (PROFESIONAL / ADMIN).
+  // A client asking for someone else's gets 404, so ids don't leak.
+  async verFoto(id: number, actor: PublicUser): Promise<StreamableFile> {
+    const user =
+      actor.id === id || actor.rol !== Rol.CLIENTE
+        ? await this.findById(id)
+        : null;
+    if (!user || user.fechaBaja !== null) {
+      throw new NotFoundException('Usuario no encontrado');
+    }
+    const perfil = this.tienePerfilConFoto(user);
+    return this.fotosService.leer(perfil ? user[perfil]?.foto : null);
+  }
+
+  // Photos belong to the profile of the current role: Cliente for a CLIENTE,
+  // Profesional for a PROFESIONAL. An ADMIN has none.
+  private tienePerfilConFoto(
+    user: Pick<UsuarioConPerfil, 'rol' | 'profesional'>,
+  ): 'cliente' | 'profesional' | null {
+    if (user.rol === Rol.CLIENTE) {
+      return 'cliente';
+    }
+    if (user.rol === Rol.PROFESIONAL && user.profesional) {
+      return 'profesional';
+    }
+    return null;
+  }
+
+  private perfilConFoto(
+    user: Pick<UsuarioConPerfil, 'rol' | 'profesional'>,
+  ): 'cliente' | 'profesional' {
+    const perfil = this.tienePerfilConFoto(user);
+    if (!perfil) {
+      throw new BadRequestException('El ADMIN no tiene foto de perfil');
+    }
+    return perfil;
+  }
+
   toPublic(user: UsuarioConPerfil): PublicUser {
     const {
       contrasena: _contrasena,
       resetToken: _resetToken,
       resetTokenExpira: _resetTokenExpira,
+      fechaNacimiento,
       ...publicUser
     } = user;
-    return publicUser;
+    return {
+      ...publicUser,
+      fechaNacimiento: fechaNacimiento ? dateAFecha(fechaNacimiento) : null,
+    };
+  }
+
+  /** "YYYY-MM-DD" -> Date for the DATE column. 400 unless it is a real past date. */
+  fechaNacimientoADate(fecha: string): Date {
+    if (!esFechaValida(fecha)) {
+      throw new BadRequestException('La fecha de nacimiento no es válida');
+    }
+    if (fecha >= ahoraEnSalon().fecha) {
+      throw new BadRequestException(
+        'La fecha de nacimiento tiene que ser anterior a hoy',
+      );
+    }
+    if (fecha < FECHA_NACIMIENTO_MINIMA) {
+      throw new BadRequestException(
+        'La fecha de nacimiento no puede ser anterior a 1900',
+      );
+    }
+    return fechaADate(fecha);
   }
 
   setResetToken(id: number, tokenHash: string, expira: Date): Promise<Usuario> {

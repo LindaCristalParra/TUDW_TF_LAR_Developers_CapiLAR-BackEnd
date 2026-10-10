@@ -39,6 +39,7 @@ model Usuario {
   apellido         String
   email            String    @unique
   telefono         String
+  fechaNacimiento  DateTime? @db.Date
   contrasena       String
   rol              Rol
   fechaAlta        DateTime  @default(now())
@@ -54,14 +55,18 @@ model Usuario {
 model Cliente {
   usuarioId Int     @id
   alergia   String? @db.VarChar(255)
+  // File name of the profile photo inside UPLOADS_DIR.
+  foto      String? @db.VarChar(100)
 
   usuario Usuario @relation(fields: [usuarioId], references: [id])
   turnos  Turno[]
 }
 
 model Profesional {
-  legajo    Int @id @default(autoincrement())
-  usuarioId Int @unique
+  legajo    Int     @id @default(autoincrement())
+  usuarioId Int     @unique
+  // File name of the profile photo inside UPLOADS_DIR.
+  foto      String? @db.VarChar(100)
 
   usuario         Usuario                 @relation(fields: [usuarioId], references: [id])
   servicios       ProfesionalServicio[]

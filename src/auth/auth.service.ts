@@ -54,6 +54,9 @@ export class AuthService {
       apellido: dto.apellido,
       email,
       telefono: dto.telefono,
+      fechaNacimiento: dto.fechaNacimiento
+        ? this.usersService.fechaNacimientoADate(dto.fechaNacimiento)
+        : undefined,
       contrasena: await bcrypt.hash(dto.contrasena, BCRYPT_SALT_ROUNDS),
       // Public sign-up only creates clients; staff accounts are created by an admin.
       rol: Rol.CLIENTE,
