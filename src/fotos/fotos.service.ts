@@ -42,7 +42,7 @@ const FORMATOS = [
   },
 ];
 
-// Profile photos on the server's disk. Only the file name is stored in the database.
+// Profile and service photos on the server's disk. Only the file name is stored in the database.
 @Injectable()
 export class FotosService implements OnModuleInit {
   private readonly logger = new Logger(FotosService.name);
@@ -96,7 +96,7 @@ export class FotosService implements OnModuleInit {
     const formato = FORMATOS.find((f) => f.ext === extname(nombre ?? ''));
     const ruta = join(this.dir, nombre ?? '');
     if (!nombre || !formato || !(await this.existe(ruta))) {
-      throw new NotFoundException('No tiene foto de perfil');
+      throw new NotFoundException('No tiene foto');
     }
     return new StreamableFile(createReadStream(ruta), {
       type: formato.mime,

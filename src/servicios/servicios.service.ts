@@ -2,7 +2,9 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  StreamableFile,
 } from '@nestjs/common';
+import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
 import { Servicio } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateServicioDto } from './dto/create-servicio.dto';
@@ -10,7 +12,10 @@ import { UpdateServicioDto } from './dto/update-servicio.dto';
 
 @Injectable()
 export class ServiciosService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fotosService: FotosService,
+  ) {}
 
   findAll(incluirBajas = false): Promise<Servicio[]> {
     return this.prisma.servicio.findMany({
@@ -55,6 +60,48 @@ export class ServiciosService {
       where: { id },
       data: { fechaBaja: null },
     });
+  }
+
+  async cambiarFoto(
+    id: number,
+    archivo: ArchivoSubido | undefined,
+  ): Promise<Servicio> {
+    const servicio = await this.findActivo(id);
+    const nombre = await this.fotosService.guardar(archivo);
+    let updated: Servicio;
+    try {
+      updated = await this.prisma.servicio.update({
+        where: { id },
+        data: { foto: nombre },
+      });
+    } catch (error) {
+      await this.fotosService.borrar(nombre);
+      throw error;
+    }
+    await this.fotosService.borrar(servicio.foto);
+    return updated;
+  }
+
+  async quitarFoto(id: number): Promise<Servicio> {
+    const servicio = await this.findActivo(id);
+    if (!servicio.foto) {
+      throw new NotFoundException('El servicio no tiene foto');
+    }
+    const updated = await this.prisma.servicio.update({
+      where: { id },
+      data: { foto: null },
+    });
+    await this.fotosService.borrar(servicio.foto);
+    return updated;
+  }
+
+  // Also for inactive services, so past turnos can still show it.
+  async verFoto(id: number): Promise<StreamableFile> {
+    const servicio = await this.prisma.servicio.findUnique({
+      where: { id },
+      select: { foto: true },
+    });
+    return this.fotosService.leer(servicio?.foto);
   }
 
   private async findActivo(id: number): Promise<Servicio> {
