@@ -42,9 +42,9 @@ export class TurnosController {
    * lista de servicios, cada uno con su profesional, hechos uno después del
    * otro. Tiene en cuenta la disponibilidad, los bloqueos, los turnos tomados
    * y la anticipación (mín. 1 hora, máx. 60 días). Cualquier usuario logueado.
-   * PROFESIONAL o ADMIN pueden mandar `turnoId` al reprogramar (su horario
-   * actual cuenta como libre) o `clienteId` al cargar un turno para un cliente;
-   * en los dos casos se tienen en cuenta los otros turnos de ese cliente.
+   * Un PROFESIONAL puede mandar `turnoId` al reprogramar (su horario actual
+   * cuenta como libre) o `clienteId` al cargar un turno para un cliente; en los
+   * dos casos se tienen en cuenta los otros turnos de ese cliente.
    */
   @Post('horarios-libres')
   @HttpCode(HttpStatus.OK)
@@ -56,10 +56,11 @@ export class TurnosController {
    * Pedir o cargar un turno
    *
    * @remarks CLIENTE: solicita un turno para sí (queda PENDIENTE y ocupa el
-   * horario). PROFESIONAL o ADMIN: cargan un turno para un cliente con
-   * `clienteId` (queda CONFIRMADO). 409 si el horario no está disponible.
+   * horario). PROFESIONAL: carga un turno para un cliente con `clienteId`
+   * (queda CONFIRMADO). 409 si el horario no está disponible.
    */
   @Post()
+  @Roles(Rol.CLIENTE, Rol.PROFESIONAL)
   create(@Body() dto: CreateTurnoDto, @Req() req: Request) {
     return this.turnosService.create(dto, req.user as PublicUser);
   }
@@ -75,35 +76,35 @@ export class TurnosController {
    * Agenda (PROFESIONAL o ADMIN)
    *
    * @remarks Turnos entre dos fechas (máx. 31 días), con nombre, teléfono y
-   * alergia del cliente. El PROFESIONAL ve la suya; el ADMIN la de un
-   * profesional (`legajo`) o la de todos.
+   * alergia del cliente. Solo lectura: con `legajo`, la de ese profesional;
+   * sin `legajo`, la de todo el salón.
    */
   @Get('agenda')
   @Roles(Rol.PROFESIONAL, Rol.ADMIN)
-  agenda(@Query() query: AgendaQueryDto, @Req() req: Request) {
-    return this.turnosService.agenda(query, req.user as PublicUser);
+  agenda(@Query() query: AgendaQueryDto) {
+    return this.turnosService.agenda(query);
   }
 
   /**
-   * Aceptar una solicitud (profesional del turno o ADMIN)
+   * Aceptar una solicitud (profesional del turno)
    *
    * @remarks PENDIENTE → CONFIRMADO. Le avisa al cliente por mail.
    */
   @Patch(':id/aceptar')
-  @Roles(Rol.PROFESIONAL, Rol.ADMIN)
+  @Roles(Rol.PROFESIONAL)
   aceptar(@Param('id', ParseIdPipe) id: number, @Req() req: Request) {
     return this.turnosService.aceptar(id, req.user as PublicUser);
   }
 
   /**
-   * Rechazar una solicitud (profesional del turno o ADMIN)
+   * Rechazar una solicitud (profesional del turno)
    *
    * @remarks PENDIENTE → RECHAZADO y el horario se libera. El motivo queda
    * guardado para el salón; el cliente recibe un mail amable, sin el motivo,
    * con los horarios alternativos ofrecidos (tienen que estar libres).
    */
   @Patch(':id/rechazar')
-  @Roles(Rol.PROFESIONAL, Rol.ADMIN)
+  @Roles(Rol.PROFESIONAL)
   rechazar(
     @Param('id', ParseIdPipe) id: number,
     @Body() dto: RechazarTurnoDto,
@@ -113,13 +114,13 @@ export class TurnosController {
   }
 
   /**
-   * Reprogramar un turno (profesional del turno o ADMIN)
+   * Reprogramar un turno (profesional del turno)
    *
    * @remarks Cambia fecha, hora y, opcionalmente, los profesionales. Queda
    * REPROGRAMADO hasta que el cliente lo acepte; el horario nuevo queda ocupado.
    */
   @Patch(':id/reprogramar')
-  @Roles(Rol.PROFESIONAL, Rol.ADMIN)
+  @Roles(Rol.PROFESIONAL)
   reprogramar(
     @Param('id', ParseIdPipe) id: number,
     @Body() dto: ReprogramarTurnoDto,
@@ -148,10 +149,11 @@ export class TurnosController {
    * @remarks Pasa a CANCELADO y el horario se libera. CLIENTE: sus turnos
    * pendientes o reprogramados antes de que empiecen, y los confirmados hasta
    * 12 horas antes; el motivo es opcional y se avisa por mail a los
-   * profesionales. Profesional del turno o ADMIN: en cualquier momento, con
-   * motivo obligatorio; el cliente recibe un mail con el motivo.
+   * profesionales. Profesional del turno: en cualquier momento, con motivo
+   * obligatorio; el cliente recibe un mail con el motivo.
    */
   @Patch(':id/cancelar')
+  @Roles(Rol.CLIENTE, Rol.PROFESIONAL)
   cancelar(
     @Param('id', ParseIdPipe) id: number,
     @Body() dto: CancelarTurnoDto,
@@ -161,12 +163,12 @@ export class TurnosController {
   }
 
   /**
-   * Marcar un turno como completado (profesional del turno o ADMIN)
+   * Marcar un turno como completado (profesional del turno)
    *
    * @remarks CONFIRMADO → COMPLETADO, a partir de la hora de inicio del turno.
    */
   @Patch(':id/completar')
-  @Roles(Rol.PROFESIONAL, Rol.ADMIN)
+  @Roles(Rol.PROFESIONAL)
   completar(@Param('id', ParseIdPipe) id: number, @Req() req: Request) {
     return this.turnosService.completar(id, req.user as PublicUser);
   }

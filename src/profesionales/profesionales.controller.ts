@@ -49,6 +49,49 @@ export class ProfesionalesController {
     return this.profesionalesService.findAll(query.servicioId);
   }
 
+  // Declared before ':legajo' routes so "me" is not parsed as a legajo.
+  /** Ver mis servicios (PROFESIONAL) */
+  @Get('me/servicios')
+  @Roles(Rol.PROFESIONAL)
+  findMisServicios(@Req() req: Request) {
+    const legajo = this.profesionalesService.legajoPropio(
+      req.user as PublicUser,
+    );
+    return this.profesionalesService.findServicios(legajo);
+  }
+
+  /**
+   * Sumar un servicio del catálogo (PROFESIONAL)
+   *
+   * @remarks 404 si el servicio no existe o está dado de baja; 409 si ya lo tengo.
+   */
+  @Post('me/servicios')
+  @Roles(Rol.PROFESIONAL)
+  asignarServicio(@Body() dto: AsignarServicioDto, @Req() req: Request) {
+    const legajo = this.profesionalesService.legajoPropio(
+      req.user as PublicUser,
+    );
+    return this.profesionalesService.asignarServicio(legajo, dto.servicioId);
+  }
+
+  /**
+   * Quitar uno de mis servicios (PROFESIONAL)
+   *
+   * @remarks Los turnos ya reservados con ese servicio se mantienen.
+   */
+  @Delete('me/servicios/:servicioId')
+  @Roles(Rol.PROFESIONAL)
+  async quitarServicio(
+    @Param('servicioId', ParseIdPipe) servicioId: number,
+    @Req() req: Request,
+  ) {
+    const legajo = this.profesionalesService.legajoPropio(
+      req.user as PublicUser,
+    );
+    await this.profesionalesService.quitarServicio(legajo, servicioId);
+    return { message: 'Servicio quitado' };
+  }
+
   /**
    * Ver la foto de perfil de un profesional
    *
@@ -73,37 +116,6 @@ export class ProfesionalesController {
   }
 
   /**
-   * Asignar un servicio a un profesional (solo ADMIN)
-   *
-   * @remarks 404 si el profesional o el servicio no existen o están dados de baja;
-   * 409 si ya lo tiene.
-   */
-  @Post(':legajo/servicios')
-  @Roles(Rol.ADMIN)
-  asignarServicio(
-    @Param('legajo', ParseIdPipe) legajo: number,
-    @Body() dto: AsignarServicioDto,
-  ) {
-    return this.profesionalesService.asignarServicio(legajo, dto.servicioId);
-  }
-
-  /**
-   * Quitar un servicio a un profesional (solo ADMIN)
-   *
-   * @remarks Borrado lógico. Los turnos ya reservados con ese servicio no se
-   * tocan; solo deja de poder reservarse con este profesional.
-   */
-  @Delete(':legajo/servicios/:servicioId')
-  @Roles(Rol.ADMIN)
-  async quitarServicio(
-    @Param('legajo', ParseIdPipe) legajo: number,
-    @Param('servicioId', ParseIdPipe) servicioId: number,
-  ) {
-    await this.profesionalesService.quitarServicio(legajo, servicioId);
-    return { message: 'Servicio quitado' };
-  }
-
-  /**
    * Ver los horarios de trabajo de un profesional en un período
    *
    * @remarks Horarios por fecha entre `desde` y `hasta` (incluidas, máx. 31 días),
@@ -123,7 +135,7 @@ export class ProfesionalesController {
   }
 
   /**
-   * Cargar un horario de trabajo en una o varias fechas (el propio profesional o ADMIN)
+   * Cargar un horario de trabajo en una o varias fechas (el propio profesional)
    *
    * @remarks El mismo horario en cada fecha de la lista (hasta 31). Se guardan
    * todas o ninguna. 400 si el inicio no es anterior al fin, si una fecha ya pasó
@@ -145,7 +157,7 @@ export class ProfesionalesController {
   }
 
   /**
-   * Quitar todos los horarios de una fecha (el propio profesional o ADMIN)
+   * Quitar todos los horarios de una fecha (el propio profesional)
    *
    * @remarks Borrado lógico. 409 si hay turnos reservados ese día; 400 si la
    * fecha ya pasó; 404 si no había horarios cargados.
@@ -168,7 +180,7 @@ export class ProfesionalesController {
   }
 
   /**
-   * Quitar un horario de trabajo (el propio profesional o ADMIN)
+   * Quitar un horario de trabajo (el propio profesional)
    *
    * @remarks Borrado lógico. 409 si hay turnos reservados dentro de ese
    * horario; 400 si la fecha ya pasó.
@@ -199,7 +211,7 @@ export class ProfesionalesController {
   }
 
   /**
-   * Bloquear la agenda (el propio profesional o ADMIN)
+   * Bloquear la agenda (el propio profesional)
    *
    * @remarks Vacaciones, trámites, etc. Fechas en hora local del salón
    * (`YYYY-MM-DDTHH:mm`). 409 si hay turnos reservados en ese período.
@@ -217,7 +229,7 @@ export class ProfesionalesController {
     );
   }
 
-  /** Quitar un bloqueo de agenda (el propio profesional o ADMIN) */
+  /** Quitar un bloqueo de agenda (el propio profesional) */
   @Delete(':legajo/bloqueos/:id')
   async deactivateBloqueo(
     @Param('legajo', ParseIdPipe) legajo: number,

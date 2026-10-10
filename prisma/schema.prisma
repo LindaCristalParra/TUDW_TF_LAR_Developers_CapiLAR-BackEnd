@@ -81,6 +81,9 @@ model Profesional {
 model Servicio {
   id             Int       @id @default(autoincrement())
   tipo           String    @db.VarChar(100)
+  descripcion    String?   @db.VarChar(500)
+  // File name in UPLOADS_DIR (served by GET /servicios/:id/foto).
+  foto           String?   @db.VarChar(100)
   // Minutes.
   tiempoDuracion Int
   precio         Decimal   @db.Decimal(10, 2)

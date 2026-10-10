@@ -119,6 +119,13 @@ export class ProfesionalesService {
     }
   }
 
+  legajoPropio(actor: PublicUser): number {
+    if (!actor.profesional) {
+      throw new NotFoundException('Profesional no encontrado');
+    }
+    return actor.profesional.legajo;
+  }
+
   // Active services the professional does.
   findServicios(legajo: number): Promise<Servicio[]> {
     return this.prisma.servicio.findMany({
@@ -146,7 +153,7 @@ export class ProfesionalesService {
       },
     });
     if (asignado && asignado.fechaBaja === null) {
-      throw new ConflictException('El profesional ya tiene ese servicio');
+      throw new ConflictException('Ya tenés ese servicio');
     }
     await this.prisma.profesionalServicio.upsert({
       where: {
@@ -165,7 +172,7 @@ export class ProfesionalesService {
       data: { fechaBaja: new Date() },
     });
     if (result.count === 0) {
-      throw new NotFoundException('El profesional no tiene ese servicio');
+      throw new NotFoundException('No tenés ese servicio');
     }
   }
 
@@ -457,11 +464,11 @@ export class ProfesionalesService {
     return new Date(fechaADate(fecha).getTime() + minutos * 60000);
   }
 
-  // ADMIN manages any schedule; a PROFESIONAL only their own.
+  // Only the PROFESIONAL can manage their own schedule.
   private assertPuedeGestionar(legajo: number, actor: PublicUser): void {
     const esPropia =
       actor.rol === Rol.PROFESIONAL && actor.profesional?.legajo === legajo;
-    if (actor.rol !== Rol.ADMIN && !esPropia) {
+    if (!esPropia) {
       throw new ForbiddenException('Solo podés gestionar tu propia agenda');
     }
   }

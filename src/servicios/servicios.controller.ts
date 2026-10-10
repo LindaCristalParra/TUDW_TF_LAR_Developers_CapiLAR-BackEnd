@@ -6,14 +6,19 @@ import {
   Param,
   Patch,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
+import { ApiFoto } from '../fotos/api-foto.decorator';
+import type { ArchivoSubido } from '../fotos/fotos.service';
+import { SubirFotoInterceptor } from '../fotos/subir-foto.interceptor';
 import { Rol } from '../generated/prisma/client';
 import { CreateServicioDto } from './dto/create-servicio.dto';
 import { UpdateServicioDto } from './dto/update-servicio.dto';
@@ -67,6 +72,51 @@ export class ServiciosController {
   @Roles(Rol.ADMIN)
   update(@Param('id', ParseIdPipe) id: number, @Body() dto: UpdateServicioDto) {
     return this.serviciosService.update(id, dto);
+  }
+
+  /**
+   * Ver la foto de un servicio
+   *
+   * @remarks Devuelve la imagen. Público, se puede usar directo en un `<img>`.
+   * 404 si no tiene foto.
+   */
+  @Get(':id/foto')
+  @Public()
+  @ApiFoto()
+  verFoto(@Param('id', ParseIdPipe) id: number) {
+    return this.serviciosService.verFoto(id);
+  }
+
+  /**
+   * Subir o cambiar la foto de un servicio (solo ADMIN)
+   *
+   * @remarks `multipart/form-data` con la imagen en el campo `foto`: JPG, PNG o
+   * WEBP de hasta 2 MB. Reemplaza la anterior. 404 si el servicio no existe o
+   * está dado de baja.
+   */
+  @Patch(':id/foto')
+  @Roles(Rol.ADMIN)
+  @UseInterceptors(SubirFotoInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['foto'],
+      properties: { foto: { type: 'string', format: 'binary' } },
+    },
+  })
+  cambiarFoto(
+    @Param('id', ParseIdPipe) id: number,
+    @UploadedFile() archivo: ArchivoSubido | undefined,
+  ) {
+    return this.serviciosService.cambiarFoto(id, archivo);
+  }
+
+  /** Quitar la foto de un servicio (solo ADMIN) */
+  @Delete(':id/foto')
+  @Roles(Rol.ADMIN)
+  quitarFoto(@Param('id', ParseIdPipe) id: number) {
+    return this.serviciosService.quitarFoto(id);
   }
 
   /**

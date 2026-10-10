@@ -2,6 +2,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsOptional,
   IsString,
   Max,
   MaxLength,
@@ -24,6 +25,18 @@ export class CreateServicioDto {
   @IsNotEmpty({ message: 'El tipo es obligatorio' })
   @Trim()
   tipo: string;
+
+  /**
+   * Opcional, para las tarjetas de servicios. `""` o `null` la borra.
+   * @example "Corte con lavado y secado."
+   */
+  @MaxLength(500, {
+    message: 'La descripción no puede superar los 500 caracteres',
+  })
+  @IsString({ message: 'La descripción debe ser un texto' })
+  @IsOptional()
+  @Trim()
+  descripcion?: string | null;
 
   /**
    * Duración en minutos: de 15 (un diagnóstico) a 420 (7 horas, el máximo de un turno).
