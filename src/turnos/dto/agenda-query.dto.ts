@@ -14,7 +14,7 @@ export class AgendaQueryDto {
   @IsNotEmpty({ message: 'hasta es obligatorio' })
   hasta: string;
 
-  /** Solo ADMIN: agenda de un profesional. Sin legajo, el ADMIN ve todos los turnos. */
+  /** Agenda de un profesional. Sin legajo, la de todo el salón. */
   @Min(1, { message: 'El legajo no es válido' })
   @IsInt({ message: 'El legajo debe ser un número' })
   @Type(() => Number)

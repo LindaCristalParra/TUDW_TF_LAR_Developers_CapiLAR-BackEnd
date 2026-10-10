@@ -49,14 +49,14 @@ export class UsersController {
   }
 
   /**
-   * Buscar clientes (PROFESIONAL o ADMIN)
+   * Buscar clientes (PROFESIONAL)
    *
    * @remarks Para elegir el cliente al cargar un turno a su nombre. Solo clientes
    * activos, ordenados por apellido y nombre, con `id`, `nombre`, `apellido`,
    * `email`, `telefono` y `cliente.alergia`.
    */
   @Get('clientes')
-  @Roles(Rol.PROFESIONAL, Rol.ADMIN)
+  @Roles(Rol.PROFESIONAL)
   findClientes(@Query() query: ListClientesQueryDto) {
     return this.usersService.findClientes(query.search);
   }

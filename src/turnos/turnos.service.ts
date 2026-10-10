@@ -87,12 +87,12 @@ export class TurnosService {
     private readonly mailService: MailService,
   ) {}
 
-  // turnoId (rescheduling) and clienteId (booking for a client) are for the salon only.
+  // turnoId (rescheduling) and clienteId (booking for a client) are for professionals only.
   async horariosLibres(dto: HorariosLibresDto, actor: PublicUser) {
     const esCliente = actor.rol === Rol.CLIENTE;
-    if (esCliente && (dto.turnoId || dto.clienteId)) {
+    if (actor.rol !== Rol.PROFESIONAL && (dto.turnoId || dto.clienteId)) {
       throw new ForbiddenException(
-        'Solo el salón puede consultar horarios para otro turno o cliente',
+        'Solo un profesional puede consultar horarios para otro turno o cliente',
       );
     }
     if (dto.turnoId && dto.clienteId) {
@@ -121,7 +121,7 @@ export class TurnosService {
     };
   }
 
-  // CLIENTE: request for themselves (PENDIENTE). PROFESIONAL / ADMIN: booking for a client (CONFIRMADO).
+  // CLIENTE: request for themselves (PENDIENTE). PROFESIONAL: booking for a client (CONFIRMADO).
   async create(dto: CreateTurnoDto, actor: PublicUser) {
     const esCliente = actor.rol === Rol.CLIENTE;
     const clienteId = esCliente ? actor.id : dto.clienteId;
@@ -192,7 +192,8 @@ export class TurnosService {
     return turnos.map((t) => this.formatear(t, { paraCliente: true }));
   }
 
-  async agenda(query: AgendaQueryDto, actor: PublicUser) {
+  // Read-only for the whole salon: one professional with legajo, everyone without it.
+  async agenda(query: AgendaQueryDto) {
     if (!esFechaValida(query.desde) || !esFechaValida(query.hasta)) {
       throw new BadRequestException('Las fechas no son válidas');
     }
@@ -210,15 +211,7 @@ export class TurnosService {
       );
     }
 
-    let legajo = query.legajo;
-    if (actor.rol === Rol.PROFESIONAL) {
-      const propio = actor.profesional?.legajo;
-      if (legajo !== undefined && legajo !== propio) {
-        throw new ForbiddenException('Solo podés ver tu propia agenda');
-      }
-      legajo = propio;
-    }
-
+    const legajo = query.legajo;
     const turnos = await this.prisma.turno.findMany({
       where: {
         fecha: { gte: fechaADate(query.desde), lte: fechaADate(query.hasta) },
@@ -483,7 +476,7 @@ export class TurnosService {
     }
   }
 
-  // ADMIN, or a PROFESIONAL that does at least one service of the turno.
+  // Only a PROFESIONAL that does at least one service of the turno.
   private async findParaGestionar(
     id: number,
     actor: PublicUser,
@@ -498,7 +491,7 @@ export class TurnosService {
     const participa =
       actor.rol === Rol.PROFESIONAL &&
       turno.detalles.some((d) => d.profesionalId === actor.profesional?.legajo);
-    if (actor.rol !== Rol.ADMIN && !participa) {
+    if (!participa) {
       throw new ForbiddenException('Solo podés gestionar turnos de tu agenda');
     }
     return turno;

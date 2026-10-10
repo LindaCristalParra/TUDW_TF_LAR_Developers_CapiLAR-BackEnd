@@ -464,11 +464,11 @@ export class ProfesionalesService {
     return new Date(fechaADate(fecha).getTime() + minutos * 60000);
   }
 
-  // ADMIN manages any schedule; a PROFESIONAL only their own.
+  // Only the PROFESIONAL can manage their own schedule.
   private assertPuedeGestionar(legajo: number, actor: PublicUser): void {
     const esPropia =
       actor.rol === Rol.PROFESIONAL && actor.profesional?.legajo === legajo;
-    if (actor.rol !== Rol.ADMIN && !esPropia) {
+    if (!esPropia) {
       throw new ForbiddenException('Solo podés gestionar tu propia agenda');
     }
   }

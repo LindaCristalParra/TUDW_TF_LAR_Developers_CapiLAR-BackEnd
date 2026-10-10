@@ -135,7 +135,7 @@ export class ProfesionalesController {
   }
 
   /**
-   * Cargar un horario de trabajo en una o varias fechas (el propio profesional o ADMIN)
+   * Cargar un horario de trabajo en una o varias fechas (el propio profesional)
    *
    * @remarks El mismo horario en cada fecha de la lista (hasta 31). Se guardan
    * todas o ninguna. 400 si el inicio no es anterior al fin, si una fecha ya pasó
@@ -157,7 +157,7 @@ export class ProfesionalesController {
   }
 
   /**
-   * Quitar todos los horarios de una fecha (el propio profesional o ADMIN)
+   * Quitar todos los horarios de una fecha (el propio profesional)
    *
    * @remarks Borrado lógico. 409 si hay turnos reservados ese día; 400 si la
    * fecha ya pasó; 404 si no había horarios cargados.
@@ -180,7 +180,7 @@ export class ProfesionalesController {
   }
 
   /**
-   * Quitar un horario de trabajo (el propio profesional o ADMIN)
+   * Quitar un horario de trabajo (el propio profesional)
    *
    * @remarks Borrado lógico. 409 si hay turnos reservados dentro de ese
    * horario; 400 si la fecha ya pasó.
@@ -211,7 +211,7 @@ export class ProfesionalesController {
   }
 
   /**
-   * Bloquear la agenda (el propio profesional o ADMIN)
+   * Bloquear la agenda (el propio profesional)
    *
    * @remarks Vacaciones, trámites, etc. Fechas en hora local del salón
    * (`YYYY-MM-DDTHH:mm`). 409 si hay turnos reservados en ese período.
@@ -229,7 +229,7 @@ export class ProfesionalesController {
     );
   }
 
-  /** Quitar un bloqueo de agenda (el propio profesional o ADMIN) */
+  /** Quitar un bloqueo de agenda (el propio profesional) */
   @Delete(':legajo/bloqueos/:id')
   async deactivateBloqueo(
     @Param('legajo', ParseIdPipe) legajo: number,
