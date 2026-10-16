@@ -3,6 +3,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -34,8 +35,14 @@ export class RegisterDto {
   @Trim()
   email: string;
 
-  /** @example "2994567890" */
-  @MaxLength(30, { message: 'El teléfono no puede superar los 30 caracteres' })
+  /**
+   * Solo números, de 10 a 13 dígitos (sin espacios, guiones ni "+").
+   * @example "2994567890"
+   */
+  @Matches(/^\d{10,13}$/, {
+    message:
+      'El teléfono debe tener entre 10 y 13 números, sin espacios ni guiones',
+  })
   @IsString({ message: 'El teléfono debe ser un texto' })
   @IsNotEmpty({ message: 'El teléfono es obligatorio' })
   @Trim()
