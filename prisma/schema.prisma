@@ -72,12 +72,12 @@ model Profesional {
   usuario         Usuario                 @relation(fields: [usuarioId], references: [id])
   servicios       ProfesionalServicio[]
   disponibilidad  DisponibilidadHoraria[]
-  bloqueos        BloqueoAgenda[]
   detallesDeTurno TurnoDetalle[]
 }
 
 // Times of day are "HH:mm" strings in the salon's local time, so there are no time zone shifts.
-// fechaBaja on Servicio, DisponibilidadHoraria and BloqueoAgenda: logical delete (ARQ-01).
+// fechaBaja on Servicio and DisponibilidadHoraria: logical delete (ARQ-01).
+// A date without working hours is a day off (there are no separate schedule blocks).
 
 model Servicio {
   id                 Int       @id @default(autoincrement())
@@ -122,20 +122,6 @@ model DisponibilidadHoraria {
   profesional Profesional @relation(fields: [profesionalId], references: [legajo])
 
   @@index([profesionalId, fecha])
-}
-
-// Time off of a professional. Date-times are local wall-clock times stored as-is.
-model BloqueoAgenda {
-  id            Int       @id @default(autoincrement())
-  profesionalId Int
-  fechaInicio   DateTime
-  fechaFin      DateTime
-  motivo        String?   @db.VarChar(255)
-  fechaBaja     DateTime?
-
-  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
-
-  @@index([profesionalId, fechaInicio])
 }
 
 // A cancelled turno keeps its row with estado CANCELADO (logical delete).

@@ -6,9 +6,6 @@ export const SALON_TIME_ZONE = 'America/Argentina/Buenos_Aires';
 
 const HORA_REGEX = /^([01]\d|2[0-3]):[0-5]\d$/;
 const FECHA_REGEX = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
-// Date-time without zone, e.g. "2026-10-07T09:30" (bloqueos de agenda).
-const FECHA_HORA_REGEX =
-  /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])T([01]\d|2[0-3]):[0-5]\d$/;
 
 export function IsHora(campo: string): PropertyDecorator {
   return Matches(HORA_REGEX, {
@@ -21,12 +18,6 @@ export function IsFecha(campo: string, each = false): PropertyDecorator {
   return Matches(FECHA_REGEX, {
     each,
     message: `${campo} debe${each ? 'n' : ''} tener el formato YYYY-MM-DD (ej. 2026-10-07)`,
-  });
-}
-
-export function IsFechaHora(campo: string): PropertyDecorator {
-  return Matches(FECHA_HORA_REGEX, {
-    message: `${campo} debe tener el formato YYYY-MM-DDTHH:mm (ej. 2026-10-07T09:30)`,
   });
 }
 
@@ -46,11 +37,6 @@ export function aHora(minutos: number): string {
 /** "2026-10-07" -> Date at 00:00 UTC, the way MySQL DATE columns round-trip. */
 export function fechaADate(fecha: string): Date {
   return new Date(`${fecha}T00:00:00.000Z`);
-}
-
-/** "2026-10-07T09:30" (local wall-clock) -> Date stored as-is in UTC. */
-export function fechaHoraADate(fechaHora: string): Date {
-  return new Date(`${fechaHora}:00.000Z`);
 }
 
 /** Date from a DATE column -> "2026-10-07" */

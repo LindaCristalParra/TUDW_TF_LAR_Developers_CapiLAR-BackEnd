@@ -21,7 +21,6 @@ import { ApiFoto } from '../fotos/api-foto.decorator';
 import { Rol } from '../generated/prisma/client';
 import { PublicUser } from '../users/users.service';
 import { AsignarServicioDto } from './dto/asignar-servicio.dto';
-import { CreateBloqueoDto } from './dto/create-bloqueo.dto';
 import { CreateDisponibilidadDto } from './dto/create-disponibilidad.dto';
 import { DisponibilidadQueryDto } from './dto/disponibilidad-query.dto';
 import { FechaQueryDto } from './dto/fecha-query.dto';
@@ -197,50 +196,5 @@ export class ProfesionalesController {
       req.user as PublicUser,
     );
     return { message: 'Horario quitado' };
-  }
-
-  /**
-   * Ver los bloqueos de agenda de un profesional
-   *
-   * @remarks Los que todavía no terminaron. Cualquier usuario logueado.
-   */
-  @Get(':legajo/bloqueos')
-  async findBloqueos(@Param('legajo', ParseIdPipe) legajo: number) {
-    await this.profesionalesService.assertActivo(legajo);
-    return this.profesionalesService.findBloqueos(legajo);
-  }
-
-  /**
-   * Bloquear la agenda (el propio profesional)
-   *
-   * @remarks Vacaciones, trámites, etc. Fechas en hora local del salón
-   * (`YYYY-MM-DDTHH:mm`). 409 si hay turnos reservados en ese período.
-   */
-  @Post(':legajo/bloqueos')
-  createBloqueo(
-    @Param('legajo', ParseIdPipe) legajo: number,
-    @Body() dto: CreateBloqueoDto,
-    @Req() req: Request,
-  ) {
-    return this.profesionalesService.createBloqueo(
-      legajo,
-      dto,
-      req.user as PublicUser,
-    );
-  }
-
-  /** Quitar un bloqueo de agenda (el propio profesional) */
-  @Delete(':legajo/bloqueos/:id')
-  async deactivateBloqueo(
-    @Param('legajo', ParseIdPipe) legajo: number,
-    @Param('id', ParseIdPipe) id: number,
-    @Req() req: Request,
-  ) {
-    await this.profesionalesService.deactivateBloqueo(
-      legajo,
-      id,
-      req.user as PublicUser,
-    );
-    return { message: 'Bloqueo quitado' };
   }
 }
