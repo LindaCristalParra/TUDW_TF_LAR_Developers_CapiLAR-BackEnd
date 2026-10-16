@@ -25,6 +25,7 @@ export const ESTADOS_OCUPAN: EstadoTurno[] = [
   EstadoTurno.CONFIRMADO,
   EstadoTurno.REPROGRAMADO,
   EstadoTurno.COMPLETADO,
+  EstadoTurno.AUSENTE,
 ];
 
 type Db = Prisma.TransactionClient;

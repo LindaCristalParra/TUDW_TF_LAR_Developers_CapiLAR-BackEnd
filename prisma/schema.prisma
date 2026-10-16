@@ -31,6 +31,7 @@ enum EstadoTurno {
   COMPLETADO
   RECHAZADO
   CANCELADO
+  AUSENTE
 }
 
 model Usuario {
@@ -139,15 +140,17 @@ model BloqueoAgenda {
 
 // A cancelled turno keeps its row with estado CANCELADO (logical delete).
 model Turno {
-  id         Int         @id @default(autoincrement())
-  clienteId  Int
-  fecha      DateTime    @db.Date
-  horaInicio String      @db.Char(5)
-  horaFin    String      @db.Char(5)
-  metodoPago MetodoPago?
-  estado     EstadoTurno @default(PENDIENTE)
+  id                     Int         @id @default(autoincrement())
+  clienteId              Int
+  fecha                  DateTime    @db.Date
+  horaInicio             String      @db.Char(5)
+  horaFin                String      @db.Char(5)
+  metodoPago             MetodoPago?
+  estado                 EstadoTurno @default(PENDIENTE)
   // Why it was rejected (internal, not shown to the client) or canceled (shown to both sides).
-  motivo     String?     @db.VarChar(500)
+  motivo                 String?     @db.VarChar(500)
+  // When the client confirmed they will come (from the app or the reminder). Reset on rescheduling.
+  asistenciaConfirmadaEn DateTime?
 
   cliente  Cliente        @relation(fields: [clienteId], references: [usuarioId])
   detalles TurnoDetalle[]
