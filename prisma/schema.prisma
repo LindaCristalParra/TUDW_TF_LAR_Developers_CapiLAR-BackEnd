@@ -203,6 +203,46 @@ model FichaTecnica {
   fechaBaja             DateTime?
 
   turnoDetalle TurnoDetalle @relation(fields: [turnoDetalleId], references: [id])
+  formulas     Formula[]
 
   @@index([turnoDetalleId])
+}
+
+enum UnidadInsumo {
+  G
+  ML
+  UNIDAD
+}
+
+// A mix applied during the service (F08), in order. Saved and replaced together with its record.
+model Formula {
+  id              Int     @id @default(autoincrement())
+  fichaId         Int
+  descripcion     String? @db.VarChar(500)
+  // Developer volume (e.g. 20 vol).
+  oxidanteVolumen Int?
+  tiempoPoseMin   Int?
+  // 1, 2, 3... in the order they were applied.
+  orden           Int
+
+  ficha   FichaTecnica    @relation(fields: [fichaId], references: [id])
+  insumos FormulaInsumo[]
+
+  @@index([fichaId])
+}
+
+model FormulaInsumo {
+  id         Int           @id @default(autoincrement())
+  formulaId  Int
+  producto   String        @db.VarChar(100)
+  marca      String?       @db.VarChar(100)
+  tono       String?       @db.VarChar(50)
+  cantidad   Decimal?      @db.Decimal(10, 2)
+  unidad     UnidadInsumo?
+  // Inventory item (F11). No foreign key until that table exists.
+  articuloId Int?
+
+  formula Formula @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+
+  @@index([formulaId])
 }

@@ -11,6 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PublicUser } from '../users/users.service';
 import { CreateFichaDto } from './dto/create-ficha.dto';
 import { FichaDto } from './dto/ficha.dto';
+import { FormulaDto } from './dto/formula.dto';
 
 const fichaInclude = {
   turnoDetalle: {
@@ -27,6 +28,10 @@ const fichaInclude = {
       },
     },
   },
+  formulas: {
+    orderBy: { orden: 'asc' },
+    include: { insumos: { orderBy: { id: 'asc' } } },
+  },
 } satisfies Prisma.FichaTecnicaInclude;
 
 type FichaCompleta = Prisma.FichaTecnicaGetPayload<{
@@ -39,7 +44,7 @@ export class FichasService {
 
   // Only the professional of that service, while the turno is CONFIRMADO.
   async create(turnoId: number, dto: CreateFichaDto, actor: PublicUser) {
-    const { turnoDetalleId, ...campos } = dto;
+    const { turnoDetalleId, formulas, ...campos } = dto;
     const detalle = await this.prisma.turnoDetalle.findUnique({
       where: { id: turnoDetalleId },
       include: { turno: { select: { estado: true } } },
@@ -63,17 +68,29 @@ export class FichasService {
     }
 
     const ficha = await this.prisma.fichaTecnica.create({
-      data: { turnoDetalleId, ...this.limpiar(campos) },
+      data: {
+        turnoDetalleId,
+        ...this.limpiar(campos),
+        formulas: { create: this.formulasData(formulas ?? []) },
+      },
       include: fichaInclude,
     });
     return this.formatear(ficha);
   }
 
+  // Formulas sent → they replace the old ones (in the same update); not sent → untouched.
   async update(id: number, dto: FichaDto, actor: PublicUser) {
     const ficha = await this.findParaEditar(id, actor);
+    const { formulas, ...campos } = dto;
     const actualizada = await this.prisma.fichaTecnica.update({
       where: { id: ficha.id },
-      data: this.limpiar(dto),
+      data: {
+        ...this.limpiar(campos),
+        formulas: formulas && {
+          deleteMany: {},
+          create: this.formulasData(formulas),
+        },
+      },
       include: fichaInclude,
     });
     return this.formatear(actualizada);
@@ -147,8 +164,27 @@ export class FichasService {
     }
   }
 
+  // The order of the list is the order they were applied in (orden 1, 2, 3...).
+  private formulasData(
+    formulas: FormulaDto[],
+  ): Prisma.FormulaCreateWithoutFichaInput[] {
+    return formulas.map((f, i) => ({
+      descripcion: f.descripcion || null,
+      oxidanteVolumen: f.oxidanteVolumen,
+      tiempoPoseMin: f.tiempoPoseMin,
+      orden: i + 1,
+      insumos: {
+        create: (f.insumos ?? []).map((insumo) => ({
+          ...insumo,
+          marca: insumo.marca || null,
+          tono: insumo.tono || null,
+        })),
+      },
+    }));
+  }
+
   // "" in a text field clears it, like null.
-  private limpiar<T extends FichaDto>(dto: T): T {
+  private limpiar<T extends Omit<FichaDto, 'formulas'>>(dto: T): T {
     const textos = [
       'tratamientosPrevios',
       'observacionesInternas',
@@ -164,10 +200,19 @@ export class FichasService {
   }
 
   private formatear(ficha: FichaCompleta) {
-    const { turnoDetalle, turnoDetalleId: _detalle, ...campos } = ficha;
+    const {
+      turnoDetalle,
+      turnoDetalleId: _detalle,
+      formulas,
+      ...campos
+    } = ficha;
     const { turno, servicio, profesional } = turnoDetalle;
     return {
       ...campos,
+      formulas: formulas.map(({ fichaId: _ficha, insumos, ...formula }) => ({
+        ...formula,
+        insumos: insumos.map(({ formulaId: _formula, ...insumo }) => insumo),
+      })),
       turnoId: turno.id,
       turnoDetalleId: turnoDetalle.id,
       clienteId: turno.clienteId,
