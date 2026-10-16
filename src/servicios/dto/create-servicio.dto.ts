@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -63,4 +64,13 @@ export class CreateServicioDto {
   )
   @IsNotEmpty({ message: 'El precio es obligatorio' })
   precio: number;
+
+  /**
+   * Si es `true`, el turno que pide un cliente queda PENDIENTE hasta que lo acepte el profesional.
+   * Si es `false` (por defecto), nace CONFIRMADO.
+   * @example false
+   */
+  @IsBoolean({ message: 'requiereEvaluacion debe ser true o false' })
+  @IsOptional()
+  requiereEvaluacion?: boolean;
 }

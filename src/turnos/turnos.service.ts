@@ -121,7 +121,8 @@ export class TurnosService {
     };
   }
 
-  // CLIENTE: request for themselves (PENDIENTE). PROFESIONAL: booking for a client (CONFIRMADO).
+  // CLIENTE: for themselves, PENDIENTE only if a service requires evaluation (else CONFIRMADO).
+  // PROFESIONAL: booking for a client, always CONFIRMADO.
   async create(dto: CreateTurnoDto, actor: PublicUser) {
     const esCliente = actor.rol === Rol.CLIENTE;
     const clienteId = esCliente ? actor.id : dto.clienteId;
@@ -140,6 +141,8 @@ export class TurnosService {
         reservaElCliente: esCliente,
       });
       assertDisponible(ctx, dto.horaInicio);
+      // One turno is one state: any service that requires evaluation keeps it all PENDIENTE.
+      const requiereEvaluacion = ctx.items.some((i) => i.requiereEvaluacion);
       return tx.turno.create({
         data: {
           clienteId,
@@ -147,7 +150,10 @@ export class TurnosService {
           horaInicio: dto.horaInicio,
           horaFin: aHora(aMinutos(dto.horaInicio) + ctx.duracionTotal),
           metodoPago: dto.metodoPago,
-          estado: esCliente ? EstadoTurno.PENDIENTE : EstadoTurno.CONFIRMADO,
+          estado:
+            esCliente && requiereEvaluacion
+              ? EstadoTurno.PENDIENTE
+              : EstadoTurno.CONFIRMADO,
           detalles: {
             create: ctx.items.map((item) => ({
               servicioId: item.servicioId,
@@ -160,7 +166,7 @@ export class TurnosService {
       });
     });
 
-    if (esCliente) {
+    if (turno.estado === EstadoTurno.PENDIENTE) {
       this.avisarCliente(turno, 'Recibimos tu solicitud de turno', {
         titulo: 'Recibimos tu solicitud',
         mensaje:
@@ -179,6 +185,19 @@ export class TurnosService {
       }
     } else {
       this.avisarConfirmado(turno);
+      // Booked by the client and confirmed on the spot: the professionals learn it by mail.
+      if (esCliente) {
+        for (const profesional of this.profesionalesDe(turno)) {
+          this.enviar(profesional.email, 'Tenés un turno nuevo', {
+            ...this.contenidoBase(turno),
+            titulo: 'Tenés un turno nuevo',
+            nombre: profesional.nombre,
+            mensaje: `${turno.cliente.usuario.nombre} ${turno.cliente.usuario.apellido} reservó un turno y ya quedó confirmado en tu agenda.`,
+            boton: 'VER MI AGENDA',
+            ruta: '/agenda',
+          });
+        }
+      }
     }
     return this.formatear(turno);
   }
