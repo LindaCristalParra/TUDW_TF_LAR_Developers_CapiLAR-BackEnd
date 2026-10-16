@@ -4,6 +4,7 @@ import {
   Get,
   HttpCode,
   HttpStatus,
+  Patch,
   Post,
   Req,
   Res,
@@ -11,7 +12,9 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { CookieOptions, Request, Response } from 'express';
+import { PublicUser } from '../users/users.service';
 import { AuthService, Sesion } from './auth.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -162,6 +165,31 @@ export class AuthController {
   @ApiBearerAuth()
   me(@Req() req: Request) {
     return req.user;
+  }
+
+  /**
+   * Cambiar mi contraseña
+   *
+   * @remarks Con la sesión iniciada, desde el perfil: `actual` y `nueva` (8 a 72
+   * caracteres, con letra y número). Cierra la sesión en los otros dispositivos y
+   * devuelve una sesión nueva (igual que el login: cookie o `refreshToken` con
+   * `X-Client: mobile`). 400 si la actual no es correcta o la nueva es igual.
+   */
+  @Patch('password')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @X_CLIENT
+  async changePassword(
+    @Body() dto: ChangePasswordDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const user = req.user as PublicUser;
+    return this.entregar(
+      await this.authService.changePassword(user.id, dto),
+      req,
+      res,
+    );
   }
 
   // The app (React Native) can't use cookies: it sends X-Client: mobile and keeps the token itself.
