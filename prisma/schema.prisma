@@ -47,6 +47,8 @@ model Usuario {
   fechaBaja        DateTime?
   resetToken       String?
   resetTokenExpira DateTime?
+  // SHA-256 of the current refresh token: one session per user. null = logged out.
+  refreshToken     String?
 
   cliente     Cliente?
   profesional Profesional?

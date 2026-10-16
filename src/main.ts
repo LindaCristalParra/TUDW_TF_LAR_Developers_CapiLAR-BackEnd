@@ -1,6 +1,7 @@
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
@@ -18,6 +19,8 @@ async function bootstrap() {
     throw new Error('CORS_ORIGINS is empty');
   }
   app.enableCors({ origin: corsOrigins, credentials: true });
+  // The web keeps the refresh token in an httpOnly cookie (see AuthController).
+  app.use(cookieParser());
 
   app.useGlobalPipes(
     new ValidationPipe({

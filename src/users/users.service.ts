@@ -31,7 +31,11 @@ export type UsuarioConPerfil = Prisma.UsuarioGetPayload<{
 // fechaNacimiento travels as "YYYY-MM-DD" (or null), like the other dates of the API.
 export type PublicUser = Omit<
   UsuarioConPerfil,
-  'contrasena' | 'resetToken' | 'resetTokenExpira' | 'fechaNacimiento'
+  | 'contrasena'
+  | 'resetToken'
+  | 'resetTokenExpira'
+  | 'refreshToken'
+  | 'fechaNacimiento'
 > & { fechaNacimiento: string | null };
 
 const FECHA_NACIMIENTO_MINIMA = '1900-01-01';
@@ -316,6 +320,7 @@ export class UsersService {
       contrasena: _contrasena,
       resetToken: _resetToken,
       resetTokenExpira: _resetTokenExpira,
+      refreshToken: _refreshToken,
       fechaNacimiento,
       ...publicUser
     } = user;
@@ -347,6 +352,14 @@ export class UsersService {
     return this.prisma.usuario.update({
       where: { id },
       data: { resetToken: tokenHash, resetTokenExpira: expira },
+    });
+  }
+
+  // null logs the user out (the current refresh token stops working).
+  async setRefreshToken(id: number, tokenHash: string | null): Promise<void> {
+    await this.prisma.usuario.update({
+      where: { id },
+      data: { refreshToken: tokenHash },
     });
   }
 
