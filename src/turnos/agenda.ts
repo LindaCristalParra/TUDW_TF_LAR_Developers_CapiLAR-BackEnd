@@ -59,8 +59,6 @@ export interface ContextoAgenda {
   duracionTotal: number;
   // legajo -> working ranges for that weekday, in minutes
   disponibilidad: Map<number, { inicio: number; fin: number }[]>;
-  // legajo -> blocked ranges for that date, in minutes (clipped to the day)
-  bloqueos: Map<number, { inicio: number; fin: number }[]>;
   ocupados: Tramo[];
   // the client's own turnos that day (whole windows), if a client is given
   turnosDelCliente: { inicio: number; fin: number }[];
@@ -197,22 +195,13 @@ export async function cargarContexto(
 
   const legajos = [...new Set(items.map((i) => i.legajo))];
   const inicioDia = fechaADate(fecha);
-  const finDia = new Date(inicioDia.getTime() + 24 * 60 * 60 * 1000);
 
-  const [horarios, bloqueos, ocupados, delCliente] = await Promise.all([
+  const [horarios, ocupados, delCliente] = await Promise.all([
     db.disponibilidadHoraria.findMany({
       where: {
         profesionalId: { in: legajos },
         fecha: inicioDia,
         fechaBaja: null,
-      },
-    }),
-    db.bloqueoAgenda.findMany({
-      where: {
-        profesionalId: { in: legajos },
-        fechaBaja: null,
-        fechaInicio: { lt: finDia },
-        fechaFin: { gt: inicioDia },
       },
     }),
     tramosOcupados(db, legajos, fecha, opciones.excluirTurnoId),
@@ -240,31 +229,11 @@ export async function cargarContexto(
     disponibilidad.set(h.profesionalId, lista);
   }
 
-  // Block date-times are stored as local wall-clock in UTC, like inicioDia.
-  const bloqueosPorLegajo = new Map<
-    number,
-    { inicio: number; fin: number }[]
-  >();
-  for (const b of bloqueos) {
-    const inicio = Math.max(
-      0,
-      (b.fechaInicio.getTime() - inicioDia.getTime()) / 60000,
-    );
-    const fin = Math.min(
-      24 * 60,
-      (b.fechaFin.getTime() - inicioDia.getTime()) / 60000,
-    );
-    const lista = bloqueosPorLegajo.get(b.profesionalId) ?? [];
-    lista.push({ inicio, fin });
-    bloqueosPorLegajo.set(b.profesionalId, lista);
-  }
-
   return {
     fecha,
     items: resueltos,
     duracionTotal,
     disponibilidad,
-    bloqueos: bloqueosPorLegajo,
     ocupados,
     turnosDelCliente: delCliente.map((t) => ({
       inicio: aMinutos(t.horaInicio),
@@ -310,13 +279,6 @@ export function motivoNoDisponible(
     );
     if (!trabaja) {
       return `${item.profesional} no atiende de ${aHora(inicio)} a ${aHora(fin)}`;
-    }
-    if (
-      (ctx.bloqueos.get(item.legajo) ?? []).some((b) =>
-        seSuperponen(inicio, fin, b.inicio, b.fin),
-      )
-    ) {
-      return `${item.profesional} no está disponible de ${aHora(inicio)} a ${aHora(fin)}`;
     }
     if (
       ctx.ocupados.some(

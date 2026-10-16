@@ -7,7 +7,6 @@ import {
   StreamableFile,
 } from '@nestjs/common';
 import {
-  BloqueoAgenda,
   DisponibilidadHoraria,
   Rol,
   Servicio,
@@ -19,19 +18,13 @@ import {
   esFechaValida,
   fechaADate,
   fechaCorta,
-  fechaHoraADate,
   seSuperponen,
 } from '../common/fecha-hora';
 import { MAX_JORNADA } from '../common/reglas-agenda';
 import { FotosService } from '../fotos/fotos.service';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  ESTADOS_OCUPAN,
-  MAX_DIAS_ANTICIPACION,
-  tramosOcupados,
-} from '../turnos/agenda';
+import { MAX_DIAS_ANTICIPACION, tramosOcupados } from '../turnos/agenda';
 import { PublicUser } from '../users/users.service';
-import { CreateBloqueoDto } from './dto/create-bloqueo.dto';
 import { CreateDisponibilidadDto } from './dto/create-disponibilidad.dto';
 
 // Longest period (in days) a schedule query can cover, like the turnos agenda.
@@ -344,90 +337,6 @@ export class ProfesionalesService {
     return result.count;
   }
 
-  // Upcoming and current blocks (the ones that haven't ended yet).
-  findBloqueos(legajo: number): Promise<BloqueoAgenda[]> {
-    return this.prisma.bloqueoAgenda.findMany({
-      where: {
-        profesionalId: legajo,
-        fechaBaja: null,
-        fechaFin: { gt: this.ahoraComoFechaHora() },
-      },
-      orderBy: { fechaInicio: 'asc' },
-    });
-  }
-
-  async createBloqueo(
-    legajo: number,
-    dto: CreateBloqueoDto,
-    actor: PublicUser,
-  ): Promise<BloqueoAgenda> {
-    this.assertPuedeGestionar(legajo, actor);
-    await this.assertActivo(legajo);
-    if (dto.fechaInicio >= dto.fechaFin) {
-      throw new BadRequestException(
-        'La fecha de inicio tiene que ser anterior a la de fin',
-      );
-    }
-    const inicio = fechaHoraADate(dto.fechaInicio);
-    const fin = fechaHoraADate(dto.fechaFin);
-
-    // Turnos already taken in that period have to be cancelled or moved first.
-    const turnos = await this.prisma.turno.findMany({
-      where: {
-        estado: { in: ESTADOS_OCUPAN },
-        fecha: {
-          gte: fechaADate(dto.fechaInicio.slice(0, 10)),
-          lte: fechaADate(dto.fechaFin.slice(0, 10)),
-        },
-        detalles: { some: { profesionalId: legajo } },
-      },
-      include: {
-        detalles: { orderBy: { id: 'asc' }, include: { servicio: true } },
-      },
-    });
-    const choca = turnos.some((turno) => {
-      let minuto = aMinutos(turno.horaInicio);
-      return turno.detalles.some((detalle) => {
-        const desde = new Date(turno.fecha.getTime() + minuto * 60000);
-        minuto += detalle.servicio.tiempoDuracion;
-        const hasta = new Date(turno.fecha.getTime() + minuto * 60000);
-        return (
-          detalle.profesionalId === legajo && desde < fin && inicio < hasta
-        );
-      });
-    });
-    if (choca) {
-      throw new ConflictException(
-        'Hay turnos reservados en ese período: cancelalos o reprogramalos antes de bloquear la agenda',
-      );
-    }
-
-    return this.prisma.bloqueoAgenda.create({
-      data: {
-        profesionalId: legajo,
-        fechaInicio: inicio,
-        fechaFin: fin,
-        motivo: dto.motivo || null,
-      },
-    });
-  }
-
-  // Logical delete (ARQ-01).
-  async deactivateBloqueo(
-    legajo: number,
-    id: number,
-    actor: PublicUser,
-  ): Promise<void> {
-    this.assertPuedeGestionar(legajo, actor);
-    const result = await this.prisma.bloqueoAgenda.updateMany({
-      where: { id, profesionalId: legajo, fechaBaja: null },
-      data: { fechaBaja: new Date() },
-    });
-    if (result.count === 0) {
-      throw new NotFoundException('Bloqueo no encontrado');
-    }
-  }
-
   // A real date, not in the past and within the booking window.
   private validarFechaDeCarga(fecha: string): void {
     if (!esFechaValida(fecha)) {
@@ -456,12 +365,6 @@ export class ProfesionalesService {
       horarioInicio: horario.horarioInicio,
       horarioFin: horario.horarioFin,
     };
-  }
-
-  // Now as a local wall-clock Date, the format blocks are stored in.
-  private ahoraComoFechaHora(): Date {
-    const { fecha, minutos } = ahoraEnSalon();
-    return new Date(fechaADate(fecha).getTime() + minutos * 60000);
   }
 
   // Only the PROFESIONAL can manage their own schedule.

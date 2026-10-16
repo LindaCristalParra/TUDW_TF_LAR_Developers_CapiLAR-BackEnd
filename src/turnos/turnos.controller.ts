@@ -40,7 +40,7 @@ export class TurnosController {
    *
    * @remarks Horas de inicio posibles (cada 15 minutos) para una fecha y una
    * lista de servicios, cada uno con su profesional, hechos uno después del
-   * otro. Tiene en cuenta la disponibilidad, los bloqueos, los turnos tomados
+   * otro. Tiene en cuenta la disponibilidad, los turnos tomados
    * y la anticipación (mín. 1 hora, máx. 60 días). Cualquier usuario logueado.
    * Un PROFESIONAL puede mandar `turnoId` al reprogramar (su horario actual
    * cuenta como libre) o `clienteId` al cargar un turno para un cliente; en los
