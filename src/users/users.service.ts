@@ -31,7 +31,11 @@ export type UsuarioConPerfil = Prisma.UsuarioGetPayload<{
 // fechaNacimiento travels as "YYYY-MM-DD" (or null), like the other dates of the API.
 export type PublicUser = Omit<
   UsuarioConPerfil,
-  'contrasena' | 'resetToken' | 'resetTokenExpira' | 'fechaNacimiento'
+  | 'contrasena'
+  | 'resetToken'
+  | 'resetTokenExpira'
+  | 'refreshToken'
+  | 'fechaNacimiento'
 > & { fechaNacimiento: string | null };
 
 const FECHA_NACIMIENTO_MINIMA = '1900-01-01';
@@ -189,6 +193,7 @@ export class UsersService {
 
   // Logical delete (ARQ-01): the row stays, fechaBaja blocks login and any
   // token still in use (JwtStrategy reloads the user on every request).
+  // The session is closed too, so it doesn't come back if the account is reactivated.
   async deactivate(id: number, actor: PublicUser): Promise<void> {
     // An admin can't remove themselves, so there is always at least one admin.
     if (id === actor.id && actor.rol === Rol.ADMIN) {
@@ -204,7 +209,12 @@ export class UsersService {
 
     await this.prisma.usuario.update({
       where: { id },
-      data: { fechaBaja: new Date(), resetToken: null, resetTokenExpira: null },
+      data: {
+        fechaBaja: new Date(),
+        resetToken: null,
+        resetTokenExpira: null,
+        refreshToken: null,
+      },
     });
   }
 
@@ -316,6 +326,7 @@ export class UsersService {
       contrasena: _contrasena,
       resetToken: _resetToken,
       resetTokenExpira: _resetTokenExpira,
+      refreshToken: _refreshToken,
       fechaNacimiento,
       ...publicUser
     } = user;
@@ -350,11 +361,20 @@ export class UsersService {
     });
   }
 
+  // null logs the user out (the current refresh token stops working).
+  async setRefreshToken(id: number, tokenHash: string | null): Promise<void> {
+    await this.prisma.usuario.update({
+      where: { id },
+      data: { refreshToken: tokenHash },
+    });
+  }
+
   findByResetToken(tokenHash: string): Promise<Usuario | null> {
     return this.prisma.usuario.findFirst({ where: { resetToken: tokenHash } });
   }
 
-  // Clears the reset token too, so each token can only be used once.
+  // Clears the reset token too, so each token can only be used once, and closes the
+  // session: whoever had the old password has to log in again.
   updatePassword(id: number, contrasenaHash: string): Promise<Usuario> {
     return this.prisma.usuario.update({
       where: { id },
@@ -362,6 +382,7 @@ export class UsersService {
         contrasena: contrasenaHash,
         resetToken: null,
         resetTokenExpira: null,
+        refreshToken: null,
       },
     });
   }

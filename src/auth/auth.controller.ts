@@ -6,43 +6,121 @@ import {
   HttpStatus,
   Post,
   Req,
+  Res,
   UseGuards,
 } from '@nestjs/common';
-import type { Request } from 'express';
-import { AuthService } from './auth.service';
+import { ConfigService } from '@nestjs/config';
+import type { CookieOptions, Request, Response } from 'express';
+import { AuthService, Sesion } from './auth.service';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
+
+const REFRESH_COOKIE = 'refreshToken';
+
+const X_CLIENT = ApiHeader({
+  name: 'X-Client',
+  required: false,
+  description:
+    'Mandá `mobile` desde la app: el refresh token viaja en el body. Sin el header (web) viaja en una cookie httpOnly.',
+});
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  private readonly cookieSegura: boolean;
+
+  constructor(
+    private readonly authService: AuthService,
+    configService: ConfigService,
+  ) {
+    // true when front and back are on different sites (deploy, HTTPS); false on localhost.
+    this.cookieSegura = configService.get('COOKIE_SECURE') === 'true';
+  }
 
   /**
    * Registrarse
    *
-   * @remarks Crea una cuenta CLIENTE, devuelve el token y manda un mail de bienvenida.
-   * 409 si el email ya está registrado (también si la cuenta está dada de baja).
+   * @remarks Crea una cuenta CLIENTE, inicia la sesión (igual que el login) y manda un
+   * mail de bienvenida. 409 si el email ya está registrado (también si la cuenta está
+   * dada de baja).
    */
   @Post('register')
-  register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  @X_CLIENT
+  async register(
+    @Body() dto: RegisterDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return this.entregar(await this.authService.register(dto), req, res);
   }
 
   /**
    * Iniciar sesión
    *
-   * @remarks Devuelve el token (`accessToken`) y el usuario. 401 con el mismo mensaje
-   * si el email no existe, la contraseña es incorrecta o la cuenta está dada de baja.
+   * @remarks Devuelve el `accessToken` (dura 15 minutos) y el usuario. El refresh token
+   * (7 días) va en una cookie httpOnly, o en el body (`refreshToken`) con
+   * `X-Client: mobile`. Iniciar sesión cierra la sesión anterior (una por usuario).
+   * 401 con el mismo mensaje si el email no existe, la contraseña es incorrecta o la
+   * cuenta está dada de baja.
    */
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  @X_CLIENT
+  async login(
+    @Body() dto: LoginDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    return this.entregar(await this.authService.login(dto), req, res);
+  }
+
+  /**
+   * Renovar la sesión
+   *
+   * @remarks Cuando el `accessToken` vence (401), devuelve uno nuevo con el refresh token
+   * de la cookie (web) o del body (`X-Client: mobile`). El refresh token se rota: el
+   * viejo deja de servir y llega uno nuevo. Usar uno viejo cierra la sesión. 401 si no
+   * hay sesión: hay que iniciar sesión de nuevo.
+   */
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @X_CLIENT
+  async refresh(
+    @Body() dto: RefreshTokenDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    try {
+      const sesion = await this.authService.refresh(this.refreshDe(dto, req));
+      return this.entregar(sesion, req, res);
+    } catch (error) {
+      this.borrarCookie(res);
+      throw error;
+    }
+  }
+
+  /**
+   * Cerrar sesión
+   *
+   * @remarks Invalida el refresh token (cookie o body con `X-Client: mobile`) y borra la
+   * cookie. Responde 200 aunque la sesión ya no exista.
+   */
+  @Post('logout')
+  @HttpCode(HttpStatus.OK)
+  @X_CLIENT
+  async logout(
+    @Body() dto: RefreshTokenDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.authService.logout(this.refreshDe(dto, req));
+    this.borrarCookie(res);
+    return { message: 'Sesión cerrada' };
   }
 
   /**
@@ -84,5 +162,43 @@ export class AuthController {
   @ApiBearerAuth()
   me(@Req() req: Request) {
     return req.user;
+  }
+
+  // The app (React Native) can't use cookies: it sends X-Client: mobile and keeps the token itself.
+  private esMobile(req: Request): boolean {
+    return req.headers['x-client'] === 'mobile';
+  }
+
+  private refreshDe(dto: RefreshTokenDto, req: Request): string | undefined {
+    return this.esMobile(req)
+      ? dto.refreshToken
+      : (req.cookies as Record<string, string | undefined>)[REFRESH_COOKIE];
+  }
+
+  // The web never gets the refresh token in the body, so page scripts can't read it.
+  private entregar(sesion: Sesion, req: Request, res: Response) {
+    const { refreshToken, ...respuesta } = sesion;
+    if (this.esMobile(req)) {
+      return { ...respuesta, refreshToken };
+    }
+    res.cookie(REFRESH_COOKIE, refreshToken, {
+      ...this.opcionesCookie(),
+      maxAge: this.authService.refreshDias * 24 * 60 * 60 * 1000,
+    });
+    return respuesta;
+  }
+
+  private borrarCookie(res: Response): void {
+    res.clearCookie(REFRESH_COOKIE, this.opcionesCookie());
+  }
+
+  // Only sent to /auth, where refresh and logout live.
+  private opcionesCookie(): CookieOptions {
+    return {
+      httpOnly: true,
+      secure: this.cookieSegura,
+      sameSite: this.cookieSegura ? 'none' : 'lax',
+      path: '/auth',
+    };
   }
 }
