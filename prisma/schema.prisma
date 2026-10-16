@@ -155,7 +155,54 @@ model TurnoDetalle {
   // Price when booked, so later price changes don't alter past turnos.
   precioBase    Decimal @db.Decimal(10, 2)
 
-  turno       Turno       @relation(fields: [turnoId], references: [id])
-  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
-  servicio    Servicio    @relation(fields: [servicioId], references: [id])
+  turno       Turno          @relation(fields: [turnoId], references: [id])
+  profesional Profesional    @relation(fields: [profesionalId], references: [legajo])
+  servicio    Servicio       @relation(fields: [servicioId], references: [id])
+  fichas      FichaTecnica[]
+}
+
+enum NivelCapilar {
+  BAJA
+  MEDIA
+  ALTA
+}
+
+enum TipoDePelo {
+  LISO
+  ONDULADO
+  RIZADO
+  AFRO
+}
+
+enum VolumenDePelo {
+  FINO
+  MEDIO
+  GRUESO
+}
+
+// Technical record (F08) of one service of a turno, filled in by its professional.
+// Locked (cerradaEn) when the turno is completed. At most one active (fechaBaja null) per detalle,
+// checked in code: a unique index would block a new record after a logical delete.
+model FichaTecnica {
+  id                    Int            @id @default(autoincrement())
+  turnoDetalleId        Int
+  porosidad             NivelCapilar?
+  elasticidad           NivelCapilar?
+  // 0 to 100.
+  porcentajeCanas       Int?
+  tipoDePelo            TipoDePelo?
+  volumenDePelo         VolumenDePelo?
+  tratamientosPrevios   String?        @db.VarChar(1000)
+  // For the salon only.
+  observacionesInternas String?        @db.VarChar(1000)
+  // Care instructions for the client.
+  indicacionesCliente   String?        @db.VarChar(1000)
+  creadaEn              DateTime       @default(now())
+  actualizadaEn         DateTime       @updatedAt
+  cerradaEn             DateTime?
+  fechaBaja             DateTime?
+
+  turnoDetalle TurnoDetalle @relation(fields: [turnoDetalleId], references: [id])
+
+  @@index([turnoDetalleId])
 }

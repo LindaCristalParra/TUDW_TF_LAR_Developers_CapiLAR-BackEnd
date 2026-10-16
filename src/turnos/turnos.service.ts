@@ -468,11 +468,18 @@ export class TurnosService {
         'El turno todavía no empezó: se completa desde su hora de inicio',
       );
     }
-    const actualizado = await this.prisma.turno.update({
-      where: { id },
-      data: { estado: EstadoTurno.COMPLETADO },
-      include: turnoInclude,
-    });
+    // The technical records of the turno are locked together with it (immutable history, FIC-01).
+    const [actualizado] = await this.prisma.$transaction([
+      this.prisma.turno.update({
+        where: { id },
+        data: { estado: EstadoTurno.COMPLETADO },
+        include: turnoInclude,
+      }),
+      this.prisma.fichaTecnica.updateMany({
+        where: { turnoDetalle: { turnoId: id }, cerradaEn: null },
+        data: { cerradaEn: new Date() },
+      }),
+    ]);
     return this.formatear(actualizado);
   }
 
