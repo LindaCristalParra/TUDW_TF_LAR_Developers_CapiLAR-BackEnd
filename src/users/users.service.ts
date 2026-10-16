@@ -17,6 +17,7 @@ import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { VerificacionEmailService } from './verificacion-email.service';
 
 // Subtype rows (DER: Cliente / Profesional) loaded with the user.
 const perfilInclude = {
@@ -35,6 +36,8 @@ export type PublicUser = Omit<
   | 'resetToken'
   | 'resetTokenExpira'
   | 'refreshToken'
+  | 'verificacionToken'
+  | 'verificacionTokenExpira'
   | 'fechaNacimiento'
 > & { fechaNacimiento: string | null };
 
@@ -47,6 +50,8 @@ const clienteResumenSelect = {
   apellido: true,
   email: true,
   telefono: true,
+  // null = not verified yet: the salon can still book for her.
+  emailVerificadoEn: true,
   cliente: { select: { alergia: true, foto: true } },
 } satisfies Prisma.UsuarioSelect;
 
@@ -59,6 +64,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly fotosService: FotosService,
+    private readonly verificacionEmail: VerificacionEmailService,
   ) {}
 
   create(data: Prisma.UsuarioCreateInput): Promise<UsuarioConPerfil> {
@@ -93,12 +99,19 @@ export class UsersService {
     }
 
     const alergia = dto.alergia || null;
+    // A new email has to be verified again (the old link stops working).
+    const cambiaEmail = email !== undefined && email !== user.email;
     const updated = await this.prisma.usuario.update({
       where: { id: user.id },
       data: {
         nombre: dto.nombre,
         apellido: dto.apellido,
         email,
+        ...(cambiaEmail && {
+          emailVerificadoEn: null,
+          verificacionToken: null,
+          verificacionTokenExpira: null,
+        }),
         telefono: dto.telefono,
         // undefined keeps it, null clears it.
         fechaNacimiento:
@@ -112,7 +125,23 @@ export class UsersService {
       },
       include: perfilInclude,
     });
+    if (cambiaEmail) {
+      void this.verificacionEmail.enviar(
+        updated,
+        'Cambiaste el email de tu cuenta de CapiLAR. Verificalo con este botón para poder seguir reservando turnos desde la app.',
+      );
+    }
     return this.toPublic(updated);
+  }
+
+  async reenviarVerificacion(user: PublicUser): Promise<void> {
+    if (user.emailVerificadoEn) {
+      throw new BadRequestException('Tu email ya está verificado');
+    }
+    await this.verificacionEmail.enviar(
+      user,
+      'Pediste un enlace nuevo para verificar tu email. Verificalo con este botón para poder reservar turnos desde la app.',
+    );
   }
 
   // F02: user list for admins.
@@ -327,6 +356,8 @@ export class UsersService {
       resetToken: _resetToken,
       resetTokenExpira: _resetTokenExpira,
       refreshToken: _refreshToken,
+      verificacionToken: _verificacionToken,
+      verificacionTokenExpira: _verificacionTokenExpira,
       fechaNacimiento,
       ...publicUser
     } = user;
