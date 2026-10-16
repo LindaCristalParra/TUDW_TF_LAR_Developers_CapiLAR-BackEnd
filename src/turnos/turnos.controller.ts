@@ -14,11 +14,13 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { Public } from '../auth/public.decorator';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import { PublicUser } from '../users/users.service';
+import { AccionTurnoDto, CancelarPorTokenDto } from './dto/accion-turno.dto';
 import { AgendaQueryDto } from './dto/agenda-query.dto';
 import { CancelarTurnoDto } from './dto/cancelar-turno.dto';
 import { CreateTurnoDto } from './dto/create-turno.dto';
@@ -171,6 +173,46 @@ export class TurnosController {
   @Roles(Rol.PROFESIONAL)
   completar(@Param('id', ParseIdPipe) id: number, @Req() req: Request) {
     return this.turnosService.completar(id, req.user as PublicUser);
+  }
+
+  /**
+   * Ver el turno del enlace del recordatorio
+   *
+   * @remarks Público (sin login): el token viene en el enlace del mail
+   * (`/turno/confirmar?token=` o `/turno/cancelar?token=`). Devuelve el turno y
+   * `puedeCancelar` (faltan 12 horas o más). 400 si el enlace no es válido, el
+   * turno cambió de horario, ya no está confirmado o ya empezó.
+   */
+  @Get('accion')
+  @Public()
+  verPorToken(@Query() dto: AccionTurnoDto) {
+    return this.turnosService.verPorToken(dto.token);
+  }
+
+  /**
+   * Confirmar asistencia desde el enlace del recordatorio
+   *
+   * @remarks Público, con el token del mail. Igual que confirmar desde la app:
+   * guarda `asistenciaConfirmadaEn`; confirmar de nuevo no cambia nada.
+   */
+  @Post('accion/confirmar')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  confirmarPorToken(@Body() dto: AccionTurnoDto) {
+    return this.turnosService.confirmarPorToken(dto.token);
+  }
+
+  /**
+   * Cancelar desde el enlace del recordatorio
+   *
+   * @remarks Público, con el token del mail. Mismas reglas que cancelar desde la
+   * app: hasta 12 horas antes; el motivo es opcional y se avisa a los profesionales.
+   */
+  @Post('accion/cancelar')
+  @Public()
+  @HttpCode(HttpStatus.OK)
+  cancelarPorToken(@Body() dto: CancelarPorTokenDto) {
+    return this.turnosService.cancelarPorToken(dto.token, dto.motivo || null);
   }
 
   /**

@@ -57,6 +57,8 @@ model Usuario {
 
   cliente     Cliente?
   profesional Profesional?
+
+  notificaciones Notificacion[]
 }
 
 // Subtypes of Usuario (DER). They share the user's lifecycle, so no fechaBaja of their own.
@@ -145,8 +147,9 @@ model Turno {
   // When the client confirmed they will come (from the app or the reminder). Reset on rescheduling.
   asistenciaConfirmadaEn DateTime?
 
-  cliente  Cliente        @relation(fields: [clienteId], references: [usuarioId])
-  detalles TurnoDetalle[]
+  cliente        Cliente        @relation(fields: [clienteId], references: [usuarioId])
+  detalles       TurnoDetalle[]
+  notificaciones Notificacion[]
 
   @@index([fecha])
 }
@@ -270,4 +273,42 @@ model FormulaInsumo {
   formula Formula @relation(fields: [formulaId], references: [id], onDelete: Cascade)
 
   @@index([formulaId])
+}
+
+enum MedioNotificacion {
+  EMAIL
+  WHATSAPP
+}
+
+enum TipoNotificacion {
+  RECORDATORIO
+  AGENDA_DIARIA
+}
+
+enum EstadoEnvio {
+  ENVIADO
+  ERROR
+}
+
+// Notices sent by scheduled jobs (F06 reminder, F07 daily agenda), one row per attempt.
+model Notificacion {
+  id          Int               @id @default(autoincrement())
+  // The reminder's turno; null for the daily agenda.
+  turnoId     Int?
+  // Who received it: the client (reminder) or the professional (daily agenda).
+  usuarioId   Int
+  medio       MedioNotificacion
+  tipo        TipoNotificacion
+  estadoEnvio EstadoEnvio
+  fechaEnvio  DateTime          @default(now())
+  // Start of the turno it was sent for (local wall-clock, like inicioDia). If the turno is
+  // rescheduled it no longer matches: the old link stops working and a new reminder goes out.
+  inicioTurno DateTime?
+  // SHA-256 of the confirm/cancel link token (reminder only).
+  tokenHash   String?           @unique @db.Char(64)
+
+  turno   Turno?  @relation(fields: [turnoId], references: [id])
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@index([turnoId, tipo])
 }

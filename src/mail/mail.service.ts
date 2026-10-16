@@ -17,6 +17,9 @@ export interface MailTurno {
   boton: string;
   // Front-end path the button opens, e.g. "/mis-turnos"
   ruta: string;
+  // Optional second button (e.g. the reminder's "NO PUEDO IR"); "" hides it.
+  botonSecundario: string;
+  rutaSecundaria: string;
 }
 
 @Injectable()
@@ -54,7 +57,13 @@ export class MailService {
       to: email,
       subject: asunto,
       template: 'turno',
-      context: { ...contenido, link: `${frontendUrl}${contenido.ruta}` },
+      context: {
+        ...contenido,
+        link: `${frontendUrl}${contenido.ruta}`,
+        linkSecundario: contenido.rutaSecundaria
+          ? `${frontendUrl}${contenido.rutaSecundaria}`
+          : '',
+      },
     });
   }
 

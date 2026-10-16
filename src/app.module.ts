@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
@@ -12,6 +13,8 @@ import { TurnosModule } from './turnos/turnos.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    // Scheduled jobs (@Cron): F06 reminders.
+    ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,
     ServiciosModule,
