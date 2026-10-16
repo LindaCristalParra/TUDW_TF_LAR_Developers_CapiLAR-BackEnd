@@ -193,6 +193,7 @@ export class UsersService {
 
   // Logical delete (ARQ-01): the row stays, fechaBaja blocks login and any
   // token still in use (JwtStrategy reloads the user on every request).
+  // The session is closed too, so it doesn't come back if the account is reactivated.
   async deactivate(id: number, actor: PublicUser): Promise<void> {
     // An admin can't remove themselves, so there is always at least one admin.
     if (id === actor.id && actor.rol === Rol.ADMIN) {
@@ -208,7 +209,12 @@ export class UsersService {
 
     await this.prisma.usuario.update({
       where: { id },
-      data: { fechaBaja: new Date(), resetToken: null, resetTokenExpira: null },
+      data: {
+        fechaBaja: new Date(),
+        resetToken: null,
+        resetTokenExpira: null,
+        refreshToken: null,
+      },
     });
   }
 
@@ -367,7 +373,8 @@ export class UsersService {
     return this.prisma.usuario.findFirst({ where: { resetToken: tokenHash } });
   }
 
-  // Clears the reset token too, so each token can only be used once.
+  // Clears the reset token too, so each token can only be used once, and closes the
+  // session: whoever had the old password has to log in again.
   updatePassword(id: number, contrasenaHash: string): Promise<Usuario> {
     return this.prisma.usuario.update({
       where: { id },
@@ -375,6 +382,7 @@ export class UsersService {
         contrasena: contrasenaHash,
         resetToken: null,
         resetTokenExpira: null,
+        refreshToken: null,
       },
     });
   }
