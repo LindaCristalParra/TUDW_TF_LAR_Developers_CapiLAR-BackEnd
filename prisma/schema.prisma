@@ -204,8 +204,28 @@ model FichaTecnica {
 
   turnoDetalle TurnoDetalle @relation(fields: [turnoDetalleId], references: [id])
   formulas     Formula[]
+  fotos        FotoFicha[]
 
   @@index([turnoDetalleId])
+}
+
+enum MomentoFoto {
+  ANTES
+  DESPUES
+}
+
+// Before/after photo of a technical record (up to 5 of each). The client sees them once the record is closed.
+model FotoFicha {
+  id       Int         @id @default(autoincrement())
+  fichaId  Int
+  tipo     MomentoFoto
+  // File name in UPLOADS_DIR (served by GET /fichas/:id/fotos/:fotoId).
+  archivo  String      @db.VarChar(100)
+  creadaEn DateTime    @default(now())
+
+  ficha FichaTecnica @relation(fields: [fichaId], references: [id])
+
+  @@index([fichaId])
 }
 
 enum UnidadInsumo {

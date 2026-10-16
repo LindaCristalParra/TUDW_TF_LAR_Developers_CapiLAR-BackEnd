@@ -4,9 +4,16 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  StreamableFile,
 } from '@nestjs/common';
 import { dateAFecha } from '../common/fecha-hora';
-import { EstadoTurno, Prisma } from '../generated/prisma/client';
+import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
+import {
+  EstadoTurno,
+  MomentoFoto,
+  Prisma,
+  Rol,
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { PublicUser } from '../users/users.service';
 import { CreateFichaDto } from './dto/create-ficha.dto';
@@ -32,15 +39,21 @@ const fichaInclude = {
     orderBy: { orden: 'asc' },
     include: { insumos: { orderBy: { id: 'asc' } } },
   },
+  fotos: { orderBy: { id: 'asc' } },
 } satisfies Prisma.FichaTecnicaInclude;
 
 type FichaCompleta = Prisma.FichaTecnicaGetPayload<{
   include: typeof fichaInclude;
 }>;
 
+const MAX_FOTOS_POR_MOMENTO = 5;
+
 @Injectable()
 export class FichasService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly fotosService: FotosService,
+  ) {}
 
   // Only the professional of that service, while the turno is CONFIRMADO.
   async create(turnoId: number, dto: CreateFichaDto, actor: PublicUser) {
@@ -129,6 +142,93 @@ export class FichasService {
     return fichas.map((f) => this.formatear(f));
   }
 
+  // The client's own records, once closed: only the care instructions and the photos.
+  async findMias(actor: PublicUser) {
+    const fichas = await this.prisma.fichaTecnica.findMany({
+      where: {
+        fechaBaja: null,
+        cerradaEn: { not: null },
+        turnoDetalle: { turno: { clienteId: actor.id } },
+      },
+      orderBy: [
+        { turnoDetalle: { turno: { fecha: 'desc' } } },
+        { turnoDetalle: { turno: { horaInicio: 'desc' } } },
+        { turnoDetalleId: 'asc' },
+      ],
+      include: fichaInclude,
+    });
+    return fichas.map((f) => this.formatearParaCliente(f));
+  }
+
+  async subirFoto(
+    id: number,
+    tipo: MomentoFoto,
+    archivo: ArchivoSubido | undefined,
+    actor: PublicUser,
+  ) {
+    const ficha = await this.findParaEditar(id, actor);
+    if (
+      ficha.fotos.filter((f) => f.tipo === tipo).length >= MAX_FOTOS_POR_MOMENTO
+    ) {
+      throw new BadRequestException(
+        `La ficha ya tiene ${MAX_FOTOS_POR_MOMENTO} fotos de ${tipo === MomentoFoto.ANTES ? 'antes' : 'después'}`,
+      );
+    }
+    const nombre = await this.fotosService.guardar(archivo);
+    try {
+      await this.prisma.fotoFicha.create({
+        data: { fichaId: id, tipo, archivo: nombre },
+      });
+    } catch (error) {
+      await this.fotosService.borrar(nombre);
+      throw error;
+    }
+    return this.findOne(id);
+  }
+
+  // While the record is open it's a draft: the file is deleted too.
+  async quitarFoto(id: number, fotoId: number, actor: PublicUser) {
+    const ficha = await this.findParaEditar(id, actor);
+    const foto = ficha.fotos.find((f) => f.id === fotoId);
+    if (!foto) {
+      throw new NotFoundException('Foto no encontrada');
+    }
+    await this.prisma.fotoFicha.delete({ where: { id: fotoId } });
+    await this.fotosService.borrar(foto.archivo);
+    return this.findOne(id);
+  }
+
+  // Any professional; the client only their own, once the record is closed (404 otherwise).
+  async verFoto(
+    id: number,
+    fotoId: number,
+    actor: PublicUser,
+  ): Promise<StreamableFile> {
+    const foto = await this.prisma.fotoFicha.findUnique({
+      where: { id: fotoId },
+      include: {
+        ficha: {
+          select: {
+            fechaBaja: true,
+            cerradaEn: true,
+            turnoDetalle: {
+              select: { turno: { select: { clienteId: true } } },
+            },
+          },
+        },
+      },
+    });
+    const { ficha } = foto ?? {};
+    const puedeVer =
+      actor.rol === Rol.PROFESIONAL ||
+      (ficha?.cerradaEn != null &&
+        ficha.turnoDetalle.turno.clienteId === actor.id);
+    if (!foto || foto.fichaId !== id || ficha?.fechaBaja || !puedeVer) {
+      throw new NotFoundException('Foto no encontrada');
+    }
+    return this.fotosService.leer(foto.archivo);
+  }
+
   // --- helpers ---
 
   private async findActiva(id: number): Promise<FichaCompleta> {
@@ -204,6 +304,7 @@ export class FichasService {
       turnoDetalle,
       turnoDetalleId: _detalle,
       formulas,
+      fotos,
       ...campos
     } = ficha;
     const { turno, servicio, profesional } = turnoDetalle;
@@ -213,6 +314,7 @@ export class FichasService {
         ...formula,
         insumos: insumos.map(({ formulaId: _formula, ...insumo }) => insumo),
       })),
+      fotos: this.formatearFotos(fotos),
       turnoId: turno.id,
       turnoDetalleId: turnoDetalle.id,
       clienteId: turno.clienteId,
@@ -222,5 +324,25 @@ export class FichasService {
       legajo: profesional.legajo,
       profesional: `${profesional.usuario.nombre} ${profesional.usuario.apellido}`,
     };
+  }
+
+  // Without the diagnosis, the formulas or the internal notes.
+  private formatearParaCliente(ficha: FichaCompleta) {
+    const { turno, servicio, profesional } = ficha.turnoDetalle;
+    return {
+      id: ficha.id,
+      turnoId: turno.id,
+      fecha: dateAFecha(turno.fecha),
+      horaInicio: turno.horaInicio,
+      servicio: servicio.tipo,
+      profesional: `${profesional.usuario.nombre} ${profesional.usuario.apellido}`,
+      indicacionesCliente: ficha.indicacionesCliente,
+      fotos: this.formatearFotos(ficha.fotos),
+    };
+  }
+
+  // The image itself is at GET /fichas/:id/fotos/:fotoId.
+  private formatearFotos(fotos: FichaCompleta['fotos']) {
+    return fotos.map(({ id, tipo, creadaEn }) => ({ id, tipo, creadaEn }));
   }
 }
