@@ -13,7 +13,7 @@ import { TurnosModule } from './turnos/turnos.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
-    // Scheduled jobs (@Cron): F06 reminders.
+    // Scheduled jobs (@Cron): F06 reminders and F07 daily agenda.
     ScheduleModule.forRoot(),
     PrismaModule,
     AuthModule,

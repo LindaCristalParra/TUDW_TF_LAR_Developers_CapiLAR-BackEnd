@@ -22,6 +22,25 @@ export interface MailTurno {
   rutaSecundaria: string;
 }
 
+/** One turno of a professional's daily agenda (templates/agenda-diaria.hbs). */
+export interface TurnoAgendaDiaria {
+  // e.g. "10:00–11:30": only this professional's services
+  horario: string;
+  cliente: string;
+  telefono: string;
+  servicios: string;
+  // "" when the client has none
+  alergia: string;
+}
+
+/** Context of templates/agenda-diaria.hbs. Only non-empty groups are sent. */
+export interface MailAgendaDiaria {
+  nombre: string;
+  // e.g. "martes 7 de octubre"
+  fecha: string;
+  grupos: { titulo: string; color: string; turnos: TurnoAgendaDiaria[] }[];
+}
+
 @Injectable()
 export class MailService {
   constructor(
@@ -64,6 +83,20 @@ export class MailService {
           ? `${frontendUrl}${contenido.rutaSecundaria}`
           : '',
       },
+    });
+  }
+
+  async sendAgendaDiaria(
+    email: string,
+    contenido: MailAgendaDiaria,
+  ): Promise<void> {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+
+    await this.mailerService.sendMail({
+      to: email,
+      subject: `Tu agenda de mañana, ${contenido.fecha}`,
+      template: 'agenda-diaria',
+      context: { ...contenido, link: `${frontendUrl}/agenda` },
     });
   }
 
