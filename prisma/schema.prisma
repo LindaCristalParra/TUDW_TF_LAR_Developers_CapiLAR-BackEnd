@@ -31,6 +31,7 @@ enum EstadoTurno {
   COMPLETADO
   RECHAZADO
   CANCELADO
+  AUSENTE
 }
 
 model Usuario {
@@ -79,15 +80,17 @@ model Profesional {
 // fechaBaja on Servicio, DisponibilidadHoraria and BloqueoAgenda: logical delete (ARQ-01).
 
 model Servicio {
-  id             Int       @id @default(autoincrement())
-  tipo           String    @db.VarChar(100)
-  descripcion    String?   @db.VarChar(500)
+  id                 Int       @id @default(autoincrement())
+  tipo               String    @db.VarChar(100)
+  descripcion        String?   @db.VarChar(500)
   // File name in UPLOADS_DIR (served by GET /servicios/:id/foto).
-  foto           String?   @db.VarChar(100)
+  foto               String?   @db.VarChar(100)
   // Minutes.
-  tiempoDuracion Int
-  precio         Decimal   @db.Decimal(10, 2)
-  fechaBaja      DateTime?
+  tiempoDuracion     Int
+  precio             Decimal   @db.Decimal(10, 2)
+  // A client's booking with one of these stays PENDIENTE until a professional accepts it.
+  requiereEvaluacion Boolean   @default(false)
+  fechaBaja          DateTime?
 
   profesionales   ProfesionalServicio[]
   detallesDeTurno TurnoDetalle[]
@@ -137,15 +140,17 @@ model BloqueoAgenda {
 
 // A cancelled turno keeps its row with estado CANCELADO (logical delete).
 model Turno {
-  id         Int         @id @default(autoincrement())
-  clienteId  Int
-  fecha      DateTime    @db.Date
-  horaInicio String      @db.Char(5)
-  horaFin    String      @db.Char(5)
-  metodoPago MetodoPago?
-  estado     EstadoTurno @default(PENDIENTE)
+  id                     Int         @id @default(autoincrement())
+  clienteId              Int
+  fecha                  DateTime    @db.Date
+  horaInicio             String      @db.Char(5)
+  horaFin                String      @db.Char(5)
+  metodoPago             MetodoPago?
+  estado                 EstadoTurno @default(PENDIENTE)
   // Why it was rejected (internal, not shown to the client) or canceled (shown to both sides).
-  motivo     String?     @db.VarChar(500)
+  motivo                 String?     @db.VarChar(500)
+  // When the client confirmed they will come (from the app or the reminder). Reset on rescheduling.
+  asistenciaConfirmadaEn DateTime?
 
   cliente  Cliente        @relation(fields: [clienteId], references: [usuarioId])
   detalles TurnoDetalle[]

@@ -25,6 +25,7 @@ export const ESTADOS_OCUPAN: EstadoTurno[] = [
   EstadoTurno.CONFIRMADO,
   EstadoTurno.REPROGRAMADO,
   EstadoTurno.COMPLETADO,
+  EstadoTurno.AUSENTE,
 ];
 
 type Db = Prisma.TransactionClient;
@@ -41,6 +42,7 @@ export interface ItemResuelto extends ItemTurno {
   profesional: string;
   duracion: number;
   precio: Prisma.Decimal;
+  requiereEvaluacion: boolean;
 }
 
 /** Minutes of the day a professional is busy with a turno. */
@@ -120,6 +122,7 @@ export async function resolverItems(
       profesional: nombre,
       duracion: servicio.tiempoDuracion,
       precio: servicio.precio,
+      requiereEvaluacion: servicio.requiereEvaluacion,
     };
   });
 }

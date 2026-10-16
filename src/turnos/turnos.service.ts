@@ -121,7 +121,8 @@ export class TurnosService {
     };
   }
 
-  // CLIENTE: request for themselves (PENDIENTE). PROFESIONAL: booking for a client (CONFIRMADO).
+  // CLIENTE: for themselves, PENDIENTE only if a service requires evaluation (else CONFIRMADO).
+  // PROFESIONAL: booking for a client, always CONFIRMADO.
   async create(dto: CreateTurnoDto, actor: PublicUser) {
     const esCliente = actor.rol === Rol.CLIENTE;
     const clienteId = esCliente ? actor.id : dto.clienteId;
@@ -140,6 +141,8 @@ export class TurnosService {
         reservaElCliente: esCliente,
       });
       assertDisponible(ctx, dto.horaInicio);
+      // One turno is one state: any service that requires evaluation keeps it all PENDIENTE.
+      const requiereEvaluacion = ctx.items.some((i) => i.requiereEvaluacion);
       return tx.turno.create({
         data: {
           clienteId,
@@ -147,7 +150,10 @@ export class TurnosService {
           horaInicio: dto.horaInicio,
           horaFin: aHora(aMinutos(dto.horaInicio) + ctx.duracionTotal),
           metodoPago: dto.metodoPago,
-          estado: esCliente ? EstadoTurno.PENDIENTE : EstadoTurno.CONFIRMADO,
+          estado:
+            esCliente && requiereEvaluacion
+              ? EstadoTurno.PENDIENTE
+              : EstadoTurno.CONFIRMADO,
           detalles: {
             create: ctx.items.map((item) => ({
               servicioId: item.servicioId,
@@ -160,7 +166,7 @@ export class TurnosService {
       });
     });
 
-    if (esCliente) {
+    if (turno.estado === EstadoTurno.PENDIENTE) {
       this.avisarCliente(turno, 'Recibimos tu solicitud de turno', {
         titulo: 'Recibimos tu solicitud',
         mensaje:
@@ -179,6 +185,19 @@ export class TurnosService {
       }
     } else {
       this.avisarConfirmado(turno);
+      // Booked by the client and confirmed on the spot: the professionals learn it by mail.
+      if (esCliente) {
+        for (const profesional of this.profesionalesDe(turno)) {
+          this.enviar(profesional.email, 'Tenés un turno nuevo', {
+            ...this.contenidoBase(turno),
+            titulo: 'Tenés un turno nuevo',
+            nombre: profesional.nombre,
+            mensaje: `${turno.cliente.usuario.nombre} ${turno.cliente.usuario.apellido} reservó un turno y ya quedó confirmado en tu agenda.`,
+            boton: 'VER MI AGENDA',
+            ruta: '/agenda',
+          });
+        }
+      }
     }
     return this.formatear(turno);
   }
@@ -333,6 +352,8 @@ export class TurnosService {
           horaInicio: dto.horaInicio,
           horaFin: aHora(aMinutos(dto.horaInicio) + ctx.duracionTotal),
           estado: EstadoTurno.REPROGRAMADO,
+          // The client confirmed the old time, not the new one.
+          asistenciaConfirmadaEn: null,
         },
         include: turnoInclude,
       });
@@ -377,7 +398,7 @@ export class TurnosService {
     }
 
     if (esCliente) {
-      const faltan = this.minutosHastaInicio(turno);
+      const faltan = this.minutosHasta(turno, turno.horaInicio);
       if (faltan <= 0) {
         throw new BadRequestException(
           'El turno ya empezó: comunicate con el salón',
@@ -442,7 +463,7 @@ export class TurnosService {
         'Solo se pueden completar turnos confirmados',
       );
     }
-    if (this.minutosHastaInicio(turno) > 0) {
+    if (this.minutosHasta(turno, turno.horaInicio) > 0) {
       throw new BadRequestException(
         'El turno todavía no empezó: se completa desde su hora de inicio',
       );
@@ -450,6 +471,49 @@ export class TurnosService {
     const actualizado = await this.prisma.turno.update({
       where: { id },
       data: { estado: EstadoTurno.COMPLETADO },
+      include: turnoInclude,
+    });
+    return this.formatear(actualizado);
+  }
+
+  // CLIENTE: "I'll be there", for a CONFIRMADO turno that hasn't started. Confirming twice keeps the first date.
+  async confirmarAsistencia(id: number, actor: PublicUser) {
+    const turno = await this.findDelCliente(id, actor);
+    if (turno.estado !== EstadoTurno.CONFIRMADO) {
+      throw new BadRequestException(
+        'Solo se puede confirmar la asistencia a turnos confirmados',
+      );
+    }
+    if (this.minutosHasta(turno, turno.horaInicio) <= 0) {
+      throw new BadRequestException('El turno ya empezó');
+    }
+    if (turno.asistenciaConfirmadaEn) {
+      return this.formatear(turno, { paraCliente: true });
+    }
+    const actualizado = await this.prisma.turno.update({
+      where: { id },
+      data: { asistenciaConfirmadaEn: new Date() },
+      include: turnoInclude,
+    });
+    return this.formatear(actualizado, { paraCliente: true });
+  }
+
+  // The client didn't come: CONFIRMADO → AUSENTE, once the turno is over. No email.
+  async marcarAusente(id: number, actor: PublicUser) {
+    const turno = await this.findParaGestionar(id, actor);
+    if (turno.estado !== EstadoTurno.CONFIRMADO) {
+      throw new BadRequestException(
+        'Solo se pueden marcar como ausentes turnos confirmados',
+      );
+    }
+    if (this.minutosHasta(turno, turno.horaFin) > 0) {
+      throw new BadRequestException(
+        'El turno todavía no terminó: se marca como ausente desde su hora de fin',
+      );
+    }
+    const actualizado = await this.prisma.turno.update({
+      where: { id },
+      data: { estado: EstadoTurno.AUSENTE },
       include: turnoInclude,
     });
     return this.formatear(actualizado);
@@ -512,12 +576,12 @@ export class TurnosService {
     return turno;
   }
 
-  /** Minutes from now (salon time) until the turno starts; negative if it already started. */
-  private minutosHastaInicio(turno: TurnoCompleto): number {
+  /** Minutes from now (salon time) until `hora` of the turno's date; negative if it already passed. */
+  private minutosHasta(turno: TurnoCompleto, hora: string): number {
     const ahora = ahoraEnSalon();
     const dias =
       (turno.fecha.getTime() - fechaADate(ahora.fecha).getTime()) / 86_400_000;
-    return dias * 1440 + aMinutos(turno.horaInicio) - ahora.minutos;
+    return dias * 1440 + aMinutos(hora) - ahora.minutos;
   }
 
   private async assertClienteActivo(clienteId: number): Promise<void> {
@@ -572,6 +636,7 @@ export class TurnosService {
       horaInicio: turno.horaInicio,
       horaFin: turno.horaFin,
       estado: turno.estado,
+      asistenciaConfirmadaEn: turno.asistenciaConfirmadaEn,
       metodoPago: turno.metodoPago,
       // A rejection reason is internal: never sent to the client. A cancellation reason is.
       ...(opciones.paraCliente && turno.estado === EstadoTurno.RECHAZADO

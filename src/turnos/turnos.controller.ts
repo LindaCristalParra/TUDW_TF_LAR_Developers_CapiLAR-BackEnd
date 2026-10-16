@@ -172,4 +172,31 @@ export class TurnosController {
   completar(@Param('id', ParseIdPipe) id: number, @Req() req: Request) {
     return this.turnosService.completar(id, req.user as PublicUser);
   }
+
+  /**
+   * Confirmar asistencia (CLIENTE dueño del turno)
+   *
+   * @remarks Guarda `asistenciaConfirmadaEn` en un turno CONFIRMADO que todavía
+   * no empezó. Confirmar de nuevo no cambia nada. Si el salón reprograma el
+   * turno, la confirmación se borra.
+   */
+  @Patch(':id/confirmar-asistencia')
+  @Roles(Rol.CLIENTE)
+  confirmarAsistencia(
+    @Param('id', ParseIdPipe) id: number,
+    @Req() req: Request,
+  ) {
+    return this.turnosService.confirmarAsistencia(id, req.user as PublicUser);
+  }
+
+  /**
+   * Marcar al cliente como ausente (profesional del turno)
+   *
+   * @remarks CONFIRMADO → AUSENTE, a partir de la hora de fin del turno. Sin mail.
+   */
+  @Patch(':id/ausente')
+  @Roles(Rol.PROFESIONAL)
+  marcarAusente(@Param('id', ParseIdPipe) id: number, @Req() req: Request) {
+    return this.turnosService.marcarAusente(id, req.user as PublicUser);
+  }
 }
