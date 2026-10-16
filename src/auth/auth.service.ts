@@ -16,6 +16,7 @@ import {
   UsersService,
   UsuarioConPerfil,
 } from '../users/users.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -190,6 +191,32 @@ export class AuthService {
       user.id,
       await bcrypt.hash(dto.contrasena, BCRYPT_SALT_ROUNDS),
     );
+  }
+
+  // Logged in. Closes the session on other devices and starts a new one here,
+  // so whoever changes it doesn't have to log in again.
+  async changePassword(
+    userId: number,
+    dto: ChangePasswordDto,
+  ): Promise<Sesion> {
+    const user = await this.usersService.findById(userId);
+    if (!user || user.fechaBaja !== null) {
+      throw new UnauthorizedException(SESION_VENCIDA);
+    }
+    if (!(await bcrypt.compare(dto.actual, user.contrasena))) {
+      throw new BadRequestException('La contraseña actual no es correcta');
+    }
+    if (dto.nueva === dto.actual) {
+      throw new BadRequestException(
+        'La contraseña nueva tiene que ser distinta de la actual',
+      );
+    }
+
+    await this.usersService.updatePassword(
+      user.id,
+      await bcrypt.hash(dto.nueva, BCRYPT_SALT_ROUNDS),
+    );
+    return this.crearSesion(user);
   }
 
   // New access + refresh token. Saving it replaces the previous one (one session per user).
