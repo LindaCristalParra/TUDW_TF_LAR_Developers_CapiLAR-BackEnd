@@ -63,6 +63,13 @@
                     <a href="{{link}}" target="_blank" style="display:inline-block; padding:16px 32px; border-radius:4px; background-color:#A35FDA; background-image:linear-gradient(90deg, #A35FDA, #F98D56); font-family:'Inter', Arial, sans-serif; font-size:16px; font-weight:500; letter-spacing:0.3px; color:#000000; text-decoration:none;">{{boton}}</a>
                   </td>
                 </tr>
+                {{#if linkSecundario}}
+                <tr>
+                  <td align="center" style="padding:4px 0 8px 0;">
+                    <a href="{{linkSecundario}}" target="_blank" style="display:inline-block; padding:14px 30px; border-radius:4px; border:2px solid #A35FDA; font-family:'Inter', Arial, sans-serif; font-size:16px; font-weight:500; letter-spacing:0.3px; color:#1E1E1E; text-decoration:none;">{{botonSecundario}}</a>
+                  </td>
+                </tr>
+                {{/if}}
               </table>
             </td>
           </tr>

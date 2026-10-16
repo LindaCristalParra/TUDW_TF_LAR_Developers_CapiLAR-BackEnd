@@ -6,7 +6,15 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { EstadoTurno, Prisma, Rol } from '../generated/prisma/client';
+import { createHash, randomBytes } from 'crypto';
+import {
+  EstadoEnvio,
+  EstadoTurno,
+  MedioNotificacion,
+  Prisma,
+  Rol,
+  TipoNotificacion,
+} from '../generated/prisma/client';
 import {
   aHora,
   aMinutos,
@@ -35,6 +43,13 @@ import { ReprogramarTurnoDto } from './dto/reprogramar-turno.dto';
 const MAX_DIAS_AGENDA = 31;
 // A client can cancel a CONFIRMADO turno up to this many hours before it starts.
 const HORAS_CANCELACION_CLIENTE = 12;
+// The reminder goes out when the turno starts within this many hours (F06).
+const HORAS_RECORDATORIO = 48;
+
+// The reminder's link token is stored hashed, like the password reset token.
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
 
 // States a turno can still be canceled from.
 const ESTADOS_CANCELABLES: EstadoTurno[] = [
@@ -386,7 +401,7 @@ export class TurnosService {
   }
 
   async aceptarReprogramacion(id: number, actor: PublicUser) {
-    const turno = await this.findDelCliente(id, actor);
+    const turno = await this.findDelCliente(id, actor.id);
     if (turno.estado !== EstadoTurno.REPROGRAMADO) {
       throw new BadRequestException(
         'Este turno no tiene un cambio de horario para aceptar',
@@ -403,74 +418,88 @@ export class TurnosService {
 
   // CLIENTE: their own turno; CONFIRMADO only up to 12 h before. Salon: any time, with a reason.
   async cancelar(id: number, dto: CancelarTurnoDto, actor: PublicUser) {
-    const esCliente = actor.rol === Rol.CLIENTE;
     const motivo = dto.motivo || null;
-    const turno = esCliente
-      ? await this.findDelCliente(id, actor)
-      : await this.findParaGestionar(id, actor);
-    if (!ESTADOS_CANCELABLES.includes(turno.estado)) {
-      throw new BadRequestException(
-        'Solo se pueden cancelar turnos pendientes, confirmados o reprogramados',
-      );
+    if (actor.rol === Rol.CLIENTE) {
+      const turno = await this.findDelCliente(id, actor.id);
+      return this.cancelarComoCliente(turno, motivo);
     }
 
-    if (esCliente) {
-      const faltan = this.minutosHasta(turno, turno.horaInicio);
-      if (faltan <= 0) {
-        throw new BadRequestException(
-          'El turno ya empezó: comunicate con el salón',
-        );
-      }
-      if (
-        turno.estado === EstadoTurno.CONFIRMADO &&
-        faltan < HORAS_CANCELACION_CLIENTE * 60
-      ) {
-        throw new BadRequestException(
-          `Los turnos confirmados se cancelan hasta ${HORAS_CANCELACION_CLIENTE} horas antes. Para cancelarlo ahora, comunicate con el salón.`,
-        );
-      }
-    } else if (!motivo) {
+    const turno = await this.findParaGestionar(id, actor);
+    this.assertCancelable(turno);
+    if (!motivo) {
       throw new BadRequestException('Contanos el motivo de la cancelación');
     }
-
     const actualizado = await this.prisma.turno.update({
       where: { id },
       data: { estado: EstadoTurno.CANCELADO, motivo },
       include: turnoInclude,
     });
-
-    if (esCliente) {
-      const { nombre, apellido } = actualizado.cliente.usuario;
-      for (const profesional of this.profesionalesDe(actualizado)) {
-        this.enviar(profesional.email, 'Se canceló un turno', {
-          ...this.contenidoBase(actualizado),
-          titulo: 'Se canceló un turno',
-          nombre: profesional.nombre,
-          mensaje: `${nombre} ${apellido} canceló su turno.${motivo ? ` Motivo: "${motivo}".` : ''} El horario ya quedó libre en tu agenda.`,
-          boton: 'VER MI AGENDA',
-          ruta: '/agenda',
-        });
-      }
-    } else {
-      this.avisarCliente(actualizado, 'Tu turno fue cancelado', {
-        titulo: 'Tu turno fue cancelado',
-        mensaje: `Lamentamos avisarte que el salón tuvo que cancelar tu turno. Motivo: "${motivo}". Entrá a la app y elegí otro horario que te quede cómodo.`,
-        boton: 'PEDIR OTRO TURNO',
+    this.avisarCliente(actualizado, 'Tu turno fue cancelado', {
+      titulo: 'Tu turno fue cancelado',
+      mensaje: `Lamentamos avisarte que el salón tuvo que cancelar tu turno. Motivo: "${motivo}". Entrá a la app y elegí otro horario que te quede cómodo.`,
+      boton: 'PEDIR OTRO TURNO',
+    });
+    // The other professionals of the turno also lose that slot from their agenda.
+    for (const profesional of this.profesionalesDe(actualizado)) {
+      if (profesional.email === actor.email) continue;
+      this.enviar(profesional.email, 'Se canceló un turno', {
+        ...this.contenidoBase(actualizado),
+        titulo: 'Se canceló un turno',
+        nombre: profesional.nombre,
+        mensaje: `El salón canceló este turno. Motivo: "${motivo}". El horario ya quedó libre en tu agenda.`,
+        boton: 'VER MI AGENDA',
+        ruta: '/agenda',
       });
-      // The other professionals of the turno also lose that slot from their agenda.
-      for (const profesional of this.profesionalesDe(actualizado)) {
-        if (profesional.email === actor.email) continue;
-        this.enviar(profesional.email, 'Se canceló un turno', {
-          ...this.contenidoBase(actualizado),
-          titulo: 'Se canceló un turno',
-          nombre: profesional.nombre,
-          mensaje: `El salón canceló este turno. Motivo: "${motivo}". El horario ya quedó libre en tu agenda.`,
-          boton: 'VER MI AGENDA',
-          ruta: '/agenda',
-        });
-      }
     }
-    return this.formatear(actualizado, { paraCliente: esCliente });
+    return this.formatear(actualizado);
+  }
+
+  // Same rules from the app and from the reminder's link. The professionals get an email.
+  private async cancelarComoCliente(
+    turno: TurnoCompleto,
+    motivo: string | null,
+  ) {
+    this.assertCancelable(turno);
+    const faltan = this.minutosHasta(turno, turno.horaInicio);
+    if (faltan <= 0) {
+      throw new BadRequestException(
+        'El turno ya empezó: comunicate con el salón',
+      );
+    }
+    if (
+      turno.estado === EstadoTurno.CONFIRMADO &&
+      faltan < HORAS_CANCELACION_CLIENTE * 60
+    ) {
+      throw new BadRequestException(
+        `Los turnos confirmados se cancelan hasta ${HORAS_CANCELACION_CLIENTE} horas antes. Para cancelarlo ahora, comunicate con el salón.`,
+      );
+    }
+
+    const actualizado = await this.prisma.turno.update({
+      where: { id: turno.id },
+      data: { estado: EstadoTurno.CANCELADO, motivo },
+      include: turnoInclude,
+    });
+    const { nombre, apellido } = actualizado.cliente.usuario;
+    for (const profesional of this.profesionalesDe(actualizado)) {
+      this.enviar(profesional.email, 'Se canceló un turno', {
+        ...this.contenidoBase(actualizado),
+        titulo: 'Se canceló un turno',
+        nombre: profesional.nombre,
+        mensaje: `${nombre} ${apellido} canceló su turno.${motivo ? ` Motivo: "${motivo}".` : ''} El horario ya quedó libre en tu agenda.`,
+        boton: 'VER MI AGENDA',
+        ruta: '/agenda',
+      });
+    }
+    return this.formatear(actualizado, { paraCliente: true });
+  }
+
+  private assertCancelable(turno: TurnoCompleto): void {
+    if (!ESTADOS_CANCELABLES.includes(turno.estado)) {
+      throw new BadRequestException(
+        'Solo se pueden cancelar turnos pendientes, confirmados o reprogramados',
+      );
+    }
   }
 
   async completar(id: number, actor: PublicUser) {
@@ -502,7 +531,11 @@ export class TurnosService {
 
   // CLIENTE: "I'll be there", for a CONFIRMADO turno that hasn't started. Confirming twice keeps the first date.
   async confirmarAsistencia(id: number, actor: PublicUser) {
-    const turno = await this.findDelCliente(id, actor);
+    return this.confirmarAsistenciaDe(await this.findDelCliente(id, actor.id));
+  }
+
+  // From the app and from the reminder's link.
+  private async confirmarAsistenciaDe(turno: TurnoCompleto) {
     if (turno.estado !== EstadoTurno.CONFIRMADO) {
       throw new BadRequestException(
         'Solo se puede confirmar la asistencia a turnos confirmados',
@@ -515,11 +548,148 @@ export class TurnosService {
       return this.formatear(turno, { paraCliente: true });
     }
     const actualizado = await this.prisma.turno.update({
-      where: { id },
+      where: { id: turno.id },
       data: { asistenciaConfirmadaEn: new Date() },
       include: turnoInclude,
     });
     return this.formatear(actualizado, { paraCliente: true });
+  }
+
+  // --- F06 reminder (the cron calls it every 15 minutes) ---
+
+  /**
+   * Emails CONFIRMADO turnos that start within 48 h (but more than 12 h from now, so the
+   * client can still cancel) and have no reminder for their current time. Returns how many
+   * were sent. A failed email is saved as ERROR and retried on the next run.
+   */
+  async enviarRecordatorios(): Promise<number> {
+    const hoy = fechaADate(ahoraEnSalon().fecha);
+    const hasta = new Date(hoy.getTime() + 2 * 86_400_000);
+    const turnos = await this.prisma.turno.findMany({
+      where: {
+        estado: EstadoTurno.CONFIRMADO,
+        fecha: { gte: hoy, lte: hasta },
+      },
+      include: {
+        ...turnoInclude,
+        notificaciones: {
+          where: {
+            tipo: TipoNotificacion.RECORDATORIO,
+            medio: MedioNotificacion.EMAIL,
+            estadoEnvio: EstadoEnvio.ENVIADO,
+          },
+        },
+      },
+    });
+
+    let enviados = 0;
+    for (const turno of turnos) {
+      const faltan = this.minutosHasta(turno, turno.horaInicio);
+      const inicio = this.inicioDe(turno);
+      if (
+        faltan <= HORAS_CANCELACION_CLIENTE * 60 ||
+        faltan > HORAS_RECORDATORIO * 60 ||
+        turno.notificaciones.some(
+          (n) => n.inicioTurno?.getTime() === inicio.getTime(),
+        )
+      ) {
+        continue;
+      }
+
+      const token = randomBytes(32).toString('hex');
+      const { usuario } = turno.cliente;
+      let estadoEnvio: EstadoEnvio = EstadoEnvio.ENVIADO;
+      try {
+        await this.mailService.sendTurno(
+          usuario.email,
+          'Recordatorio de tu turno',
+          {
+            ...this.contenidoBase(turno),
+            titulo: '¿Nos vemos en tu turno?',
+            nombre: usuario.nombre,
+            mensaje: `Te recordamos tu turno. Confirmanos si venís. Si no podés, cancelalo hasta ${HORAS_CANCELACION_CLIENTE} horas antes así otra persona puede usar el horario.`,
+            boton: 'CONFIRMO QUE VOY',
+            ruta: `/turno/confirmar?token=${token}`,
+            botonSecundario: 'NO PUEDO IR',
+            rutaSecundaria: `/turno/cancelar?token=${token}`,
+          },
+        );
+        enviados++;
+      } catch (error) {
+        estadoEnvio = EstadoEnvio.ERROR;
+        this.logger.error(
+          `Could not send reminder of turno ${turno.id} to ${usuario.email}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+      await this.prisma.notificacion.create({
+        data: {
+          turnoId: turno.id,
+          usuarioId: usuario.id,
+          medio: MedioNotificacion.EMAIL,
+          tipo: TipoNotificacion.RECORDATORIO,
+          estadoEnvio,
+          inicioTurno: inicio,
+          tokenHash:
+            estadoEnvio === EstadoEnvio.ENVIADO ? hashToken(token) : null,
+        },
+      });
+    }
+    return enviados;
+  }
+
+  // Public routes with the reminder's link token (no login).
+
+  async verPorToken(token: string) {
+    const turno = await this.turnoDelToken(token);
+    return {
+      ...this.formatear(turno, { paraCliente: true }),
+      puedeCancelar:
+        this.minutosHasta(turno, turno.horaInicio) >=
+        HORAS_CANCELACION_CLIENTE * 60,
+    };
+  }
+
+  async confirmarPorToken(token: string) {
+    return this.confirmarAsistenciaDe(await this.turnoDelToken(token));
+  }
+
+  async cancelarPorToken(token: string, motivo: string | null) {
+    return this.cancelarComoCliente(await this.turnoDelToken(token), motivo);
+  }
+
+  // Valid while the turno is still CONFIRMADO, at the same time, and hasn't started.
+  private async turnoDelToken(token: string): Promise<TurnoCompleto> {
+    const notificacion = await this.prisma.notificacion.findUnique({
+      where: { tokenHash: hashToken(token) },
+      include: { turno: { include: turnoInclude } },
+    });
+    const turno = notificacion?.turno;
+    if (
+      !turno ||
+      notificacion.tipo !== TipoNotificacion.RECORDATORIO ||
+      notificacion.inicioTurno?.getTime() !== this.inicioDe(turno).getTime()
+    ) {
+      throw new BadRequestException(
+        'El enlace no es válido o el turno cambió de horario. Revisá tus turnos en la app.',
+      );
+    }
+    if (turno.estado !== EstadoTurno.CONFIRMADO) {
+      throw new BadRequestException(
+        'Este turno ya no está confirmado. Revisá tus turnos en la app.',
+      );
+    }
+    if (this.minutosHasta(turno, turno.horaInicio) <= 0) {
+      throw new BadRequestException('El turno ya empezó');
+    }
+    return turno;
+  }
+
+  /** Start of the turno as a local wall-clock Date (date at 00:00 UTC + minutes). */
+  private inicioDe(turno: { fecha: Date; horaInicio: string }): Date {
+    return new Date(
+      turno.fecha.getTime() + aMinutos(turno.horaInicio) * 60_000,
+    );
   }
 
   // The client didn't come: CONFIRMADO → AUSENTE, once the turno is over. No email.
@@ -588,13 +758,13 @@ export class TurnosService {
   // A CLIENTE only sees their own turnos (404 for the rest, so ids don't leak).
   private async findDelCliente(
     id: number,
-    actor: PublicUser,
+    clienteId: number,
   ): Promise<TurnoCompleto> {
     const turno = await this.prisma.turno.findUnique({
       where: { id },
       include: turnoInclude,
     });
-    if (!turno || turno.clienteId !== actor.id) {
+    if (!turno || turno.clienteId !== clienteId) {
       throw new NotFoundException('Turno no encontrado');
     }
     return turno;
@@ -691,6 +861,8 @@ export class TurnosService {
         profesional: d.profesional,
       })),
       alternativas: [] as string[],
+      botonSecundario: '',
+      rutaSecundaria: '',
     };
   }
 
