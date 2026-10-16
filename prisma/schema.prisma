@@ -155,7 +155,114 @@ model TurnoDetalle {
   // Price when booked, so later price changes don't alter past turnos.
   precioBase    Decimal @db.Decimal(10, 2)
 
-  turno       Turno       @relation(fields: [turnoId], references: [id])
-  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
-  servicio    Servicio    @relation(fields: [servicioId], references: [id])
+  turno       Turno          @relation(fields: [turnoId], references: [id])
+  profesional Profesional    @relation(fields: [profesionalId], references: [legajo])
+  servicio    Servicio       @relation(fields: [servicioId], references: [id])
+  fichas      FichaTecnica[]
+}
+
+enum NivelCapilar {
+  BAJA
+  MEDIA
+  ALTA
+}
+
+enum TipoDePelo {
+  LISO
+  ONDULADO
+  RIZADO
+  AFRO
+}
+
+enum VolumenDePelo {
+  FINO
+  MEDIO
+  GRUESO
+}
+
+// Technical record (F08) of one service of a turno, filled in by its professional.
+// Locked (cerradaEn) when the turno is completed. At most one active (fechaBaja null) per detalle,
+// checked in code: a unique index would block a new record after a logical delete.
+model FichaTecnica {
+  id                    Int            @id @default(autoincrement())
+  turnoDetalleId        Int
+  porosidad             NivelCapilar?
+  elasticidad           NivelCapilar?
+  // 0 to 100.
+  porcentajeCanas       Int?
+  tipoDePelo            TipoDePelo?
+  volumenDePelo         VolumenDePelo?
+  tratamientosPrevios   String?        @db.VarChar(1000)
+  // For the salon only.
+  observacionesInternas String?        @db.VarChar(1000)
+  // Care instructions for the client.
+  indicacionesCliente   String?        @db.VarChar(1000)
+  creadaEn              DateTime       @default(now())
+  actualizadaEn         DateTime       @updatedAt
+  cerradaEn             DateTime?
+  fechaBaja             DateTime?
+
+  turnoDetalle TurnoDetalle @relation(fields: [turnoDetalleId], references: [id])
+  formulas     Formula[]
+  fotos        FotoFicha[]
+
+  @@index([turnoDetalleId])
+}
+
+enum MomentoFoto {
+  ANTES
+  DESPUES
+}
+
+// Before/after photo of a technical record (up to 5 of each). The client sees them once the record is closed.
+model FotoFicha {
+  id       Int         @id @default(autoincrement())
+  fichaId  Int
+  tipo     MomentoFoto
+  // File name in UPLOADS_DIR (served by GET /fichas/:id/fotos/:fotoId).
+  archivo  String      @db.VarChar(100)
+  creadaEn DateTime    @default(now())
+
+  ficha FichaTecnica @relation(fields: [fichaId], references: [id])
+
+  @@index([fichaId])
+}
+
+enum UnidadInsumo {
+  G
+  ML
+  UNIDAD
+}
+
+// A mix applied during the service (F08), in order. Saved and replaced together with its record.
+model Formula {
+  id              Int     @id @default(autoincrement())
+  fichaId         Int
+  descripcion     String? @db.VarChar(500)
+  // Developer volume (e.g. 20 vol).
+  oxidanteVolumen Int?
+  tiempoPoseMin   Int?
+  // 1, 2, 3... in the order they were applied.
+  orden           Int
+
+  ficha   FichaTecnica    @relation(fields: [fichaId], references: [id])
+  insumos FormulaInsumo[]
+
+  @@index([fichaId])
+}
+
+model FormulaInsumo {
+  id         Int           @id @default(autoincrement())
+  formulaId  Int
+  producto   String        @db.VarChar(100)
+  marca      String?       @db.VarChar(100)
+  tono       String?       @db.VarChar(50)
+  cantidad   Decimal?      @db.Decimal(10, 2)
+  unidad     UnidadInsumo?
+  // Inventory item (F11). No foreign key until that table exists.
+  articuloId Int?
+
+  formula Formula @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+
+  @@index([formulaId])
 }
