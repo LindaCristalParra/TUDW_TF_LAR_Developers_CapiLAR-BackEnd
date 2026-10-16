@@ -16,6 +16,7 @@ import {
   UsersService,
   UsuarioConPerfil,
 } from '../users/users.service';
+import { VerificacionEmailService } from '../users/verificacion-email.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -67,6 +68,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
+    private readonly verificacionEmail: VerificacionEmailService,
     configService: ConfigService,
   ) {
     this.refreshSecret = configService.getOrThrow<string>('JWT_REFRESH_SECRET');
@@ -94,13 +96,16 @@ export class AuthService {
     });
 
     // Not awaited: the account already exists, so a slow or failed email
-    // must not delay or break the sign-up response.
-    this.mailService.sendWelcome(user.email, user.nombre).catch((error) => {
-      this.logger.error(
-        `Could not send welcome email to ${user.email}`,
-        error instanceof Error ? error.stack : String(error),
-      );
-    });
+    // must not delay or break the sign-up response. It carries the verification link.
+    const tokenVerificacion = await this.verificacionEmail.nuevoToken(user.id);
+    this.mailService
+      .sendWelcome(user.email, user.nombre, tokenVerificacion)
+      .catch((error) => {
+        this.logger.error(
+          `Could not send welcome email to ${user.email}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      });
 
     return this.crearSesion(user);
   }
@@ -191,6 +196,10 @@ export class AuthService {
       user.id,
       await bcrypt.hash(dto.contrasena, BCRYPT_SALT_ROUNDS),
     );
+  }
+
+  verificarEmail(token: string): Promise<void> {
+    return this.verificacionEmail.verificar(token);
   }
 
   // Logged in. Closes the session on other devices and starts a new one here,

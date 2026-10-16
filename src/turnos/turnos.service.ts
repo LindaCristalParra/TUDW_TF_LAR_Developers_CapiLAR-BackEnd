@@ -18,6 +18,7 @@ import {
 import { MailService, MailTurno } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PublicUser } from '../users/users.service';
+import { VerificacionEmailService } from '../users/verificacion-email.service';
 import {
   ItemTurno,
   assertDisponible,
@@ -65,6 +66,7 @@ const turnoInclude = {
           apellido: true,
           telefono: true,
           email: true,
+          emailVerificadoEn: true,
         },
       },
     },
@@ -85,6 +87,7 @@ export class TurnosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
+    private readonly verificacionEmail: VerificacionEmailService,
   ) {}
 
   // turnoId (rescheduling) and clienteId (booking for a client) are for professionals only.
@@ -129,6 +132,12 @@ export class TurnosService {
     if (!clienteId) {
       throw new BadRequestException(
         'Indicá el cliente (clienteId) para cargar el turno',
+      );
+    }
+    // F06: a client books by herself only with a verified email. The salon can book for her anyway.
+    if (esCliente && !actor.emailVerificadoEn) {
+      throw new ForbiddenException(
+        `Para reservar tenés que verificar tu email. Abrí el enlace que te mandamos a ${actor.email} o pedí uno nuevo desde tu perfil.`,
       );
     }
     if (!esCliente) {
@@ -198,6 +207,14 @@ export class TurnosService {
           });
         }
       }
+    }
+    // Booked by the salon for an unverified client: once per booking, she's asked to verify.
+    const { usuario } = turno.cliente;
+    if (!esCliente && !usuario.emailVerificadoEn) {
+      void this.verificacionEmail.enviar(
+        usuario,
+        'El salón te cargó un turno en CapiLAR. Verificá tu email con este botón para poder reservar vos misma desde la app.',
+      );
     }
     return this.formatear(turno);
   }
@@ -655,6 +672,8 @@ export class TurnosService {
         apellido: usuario.apellido,
         telefono: usuario.telefono,
         alergia,
+        // null = email not verified yet (the agenda shows it).
+        emailVerificadoEn: usuario.emailVerificadoEn,
       },
       detalles,
     };

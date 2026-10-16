@@ -35,20 +35,25 @@ enum EstadoTurno {
 }
 
 model Usuario {
-  id               Int       @id @default(autoincrement())
-  nombre           String
-  apellido         String
-  email            String    @unique
-  telefono         String
-  fechaNacimiento  DateTime? @db.Date
-  contrasena       String
-  rol              Rol
-  fechaAlta        DateTime  @default(now())
-  fechaBaja        DateTime?
-  resetToken       String?
-  resetTokenExpira DateTime?
+  id                      Int       @id @default(autoincrement())
+  nombre                  String
+  apellido                String
+  email                   String    @unique
+  telefono                String
+  fechaNacimiento         DateTime? @db.Date
+  contrasena              String
+  rol                     Rol
+  fechaAlta               DateTime  @default(now())
+  fechaBaja               DateTime?
+  resetToken              String?
+  resetTokenExpira        DateTime?
   // SHA-256 of the current refresh token: one session per user. null = logged out.
-  refreshToken     String?
+  refreshToken            String?
+  // null = email not verified. A client has to verify it to book by herself.
+  emailVerificadoEn       DateTime?
+  // SHA-256 of the verification link token (like resetToken), 7 days, single use.
+  verificacionToken       String?
+  verificacionTokenExpira DateTime?
 
   cliente     Cliente?
   profesional Profesional?

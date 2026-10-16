@@ -58,15 +58,43 @@ export class MailService {
     });
   }
 
-  async sendWelcome(email: string, nombre: string): Promise<void> {
+  // Includes the email verification link (token without hashing).
+  async sendWelcome(
+    email: string,
+    nombre: string,
+    tokenVerificacion: string,
+  ): Promise<void> {
     const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
-    const link = `${frontendUrl}/login`;
 
     await this.mailerService.sendMail({
       to: email,
       subject: '¡Bienvenida/o a CapiLAR!',
       template: 'welcome',
-      context: { nombre, link },
+      context: {
+        nombre,
+        link: this.linkVerificacion(tokenVerificacion),
+        linkLogin: `${frontendUrl}/login`,
+      },
     });
+  }
+
+  // Resend, email change or a turno booked by the salon: `mensaje` says why it arrives.
+  async sendVerificacion(
+    email: string,
+    nombre: string,
+    token: string,
+    mensaje: string,
+  ): Promise<void> {
+    await this.mailerService.sendMail({
+      to: email,
+      subject: 'Verificá tu email de CapiLAR',
+      template: 'verificar-email',
+      context: { nombre, mensaje, link: this.linkVerificacion(token) },
+    });
+  }
+
+  private linkVerificacion(token: string): string {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    return `${frontendUrl}/verificar-email?token=${token}`;
   }
 }

@@ -20,6 +20,7 @@ import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerificarEmailDto } from './dto/verificar-email.dto';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 
@@ -153,6 +154,20 @@ export class AuthController {
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.authService.resetPassword(dto);
     return { message: 'Contraseña actualizada correctamente' };
+  }
+
+  /**
+   * Verificar el email
+   *
+   * @remarks Usa el token del enlace del mail (`/verificar-email?token=...`), que dura
+   * 7 días y sirve una sola vez. No hace falta iniciar sesión. 400 si es inválido, ya
+   * se usó o venció (se pide otro con `POST /users/me/verificar-email`).
+   */
+  @Post('verificar-email')
+  @HttpCode(HttpStatus.OK)
+  async verificarEmail(@Body() dto: VerificarEmailDto) {
+    await this.authService.verificarEmail(dto.token);
+    return { message: 'Tu email quedó verificado' };
   }
 
   /**

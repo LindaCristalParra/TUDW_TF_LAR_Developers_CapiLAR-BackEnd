@@ -3,8 +3,11 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
+  Post,
   Query,
   Req,
   UploadedFile,
@@ -70,6 +73,21 @@ export class UsersController {
   @Patch('me')
   updateMe(@Req() req: Request, @Body() dto: UpdateProfileDto) {
     return this.usersService.updateProfile(req.user as PublicUser, dto);
+  }
+
+  /**
+   * Pedir otro enlace para verificar mi email
+   *
+   * @remarks Manda un mail con un enlace nuevo (vence en 7 días; el anterior deja
+   * de servir). 400 si el email ya está verificado.
+   */
+  @Post('me/verificar-email')
+  @HttpCode(HttpStatus.OK)
+  async reenviarVerificacion(@Req() req: Request) {
+    await this.usersService.reenviarVerificacion(req.user as PublicUser);
+    return {
+      message: `Te mandamos un enlace a ${(req.user as PublicUser).email}`,
+    };
   }
 
   /**
