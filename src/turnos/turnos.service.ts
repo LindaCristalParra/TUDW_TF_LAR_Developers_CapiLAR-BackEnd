@@ -48,7 +48,7 @@ const MAX_DIAS_AGENDA = 31;
 // A client can cancel a CONFIRMADO turno up to this many hours before it starts.
 const HORAS_CANCELACION_CLIENTE = 12;
 // The reminder goes out when the turno starts within this many hours (F06).
-const HORAS_RECORDATORIO = 48;
+const HORAS_RECORDATORIO = 24;
 
 // The reminder's link token is stored hashed, like the password reset token.
 function hashToken(token: string): string {
@@ -571,13 +571,15 @@ export class TurnosService {
   // --- F06 reminder (the cron calls it every 15 minutes) ---
 
   /**
-   * Emails CONFIRMADO turnos that start within 48 h (but more than 12 h from now, so the
+   * Emails CONFIRMADO turnos that start within 24 h (but more than 12 h from now, so the
    * client can still cancel) and have no reminder for their current time. Returns how many
    * were sent. A failed email is saved as ERROR and retried on the next run.
    */
   async enviarRecordatorios(): Promise<number> {
     const hoy = fechaADate(ahoraEnSalon().fecha);
-    const hasta = new Date(hoy.getTime() + 2 * 86_400_000);
+    const hasta = new Date(
+      hoy.getTime() + Math.ceil(HORAS_RECORDATORIO / 24) * 86_400_000,
+    );
     const turnos = await this.prisma.turno.findMany({
       where: {
         estado: EstadoTurno.CONFIRMADO,
