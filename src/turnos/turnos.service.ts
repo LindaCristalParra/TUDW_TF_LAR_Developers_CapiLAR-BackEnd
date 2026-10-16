@@ -23,7 +23,11 @@ import {
   esFechaValida,
   fechaADate,
 } from '../common/fecha-hora';
-import { MailService, MailTurno } from '../mail/mail.service';
+import {
+  MailService,
+  MailTurno,
+  TurnoAgendaDiaria,
+} from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { PublicUser } from '../users/users.service';
 import { VerificacionEmailService } from '../users/verificacion-email.service';
@@ -44,7 +48,7 @@ const MAX_DIAS_AGENDA = 31;
 // A client can cancel a CONFIRMADO turno up to this many hours before it starts.
 const HORAS_CANCELACION_CLIENTE = 12;
 // The reminder goes out when the turno starts within this many hours (F06).
-const HORAS_RECORDATORIO = 48;
+const HORAS_RECORDATORIO = 24;
 
 // The reminder's link token is stored hashed, like the password reset token.
 function hashToken(token: string): string {
@@ -66,7 +70,16 @@ const turnoInclude = {
       profesional: {
         select: {
           legajo: true,
-          usuario: { select: { nombre: true, apellido: true, email: true } },
+          usuario: {
+            select: {
+              id: true,
+              nombre: true,
+              apellido: true,
+              email: true,
+              rol: true,
+              fechaBaja: true,
+            },
+          },
         },
       },
     },
@@ -558,13 +571,15 @@ export class TurnosService {
   // --- F06 reminder (the cron calls it every 15 minutes) ---
 
   /**
-   * Emails CONFIRMADO turnos that start within 48 h (but more than 12 h from now, so the
+   * Emails CONFIRMADO turnos that start within 24 h (but more than 12 h from now, so the
    * client can still cancel) and have no reminder for their current time. Returns how many
    * were sent. A failed email is saved as ERROR and retried on the next run.
    */
   async enviarRecordatorios(): Promise<number> {
     const hoy = fechaADate(ahoraEnSalon().fecha);
-    const hasta = new Date(hoy.getTime() + 2 * 86_400_000);
+    const hasta = new Date(
+      hoy.getTime() + Math.ceil(HORAS_RECORDATORIO / 24) * 86_400_000,
+    );
     const turnos = await this.prisma.turno.findMany({
       where: {
         estado: EstadoTurno.CONFIRMADO,
@@ -690,6 +705,151 @@ export class TurnosService {
     return new Date(
       turno.fecha.getTime() + aMinutos(turno.horaInicio) * 60_000,
     );
+  }
+
+  // --- F07 daily agenda (the cron calls it at 21:00) ---
+
+  /**
+   * Emails each active professional their turnos of `fecha` (tomorrow by default): CONFIRMADO
+   * split by attendance confirmed or not, and PENDIENTE requests apart. Only their own services
+   * of each turno. No turnos → no email. Whoever already got that date's agenda is skipped.
+   * Returns how many emails were sent.
+   */
+  async enviarAgendasDiarias(fecha = this.manana()): Promise<number> {
+    const dia = fechaADate(fecha);
+    const turnos = await this.prisma.turno.findMany({
+      where: {
+        fecha: dia,
+        estado: { in: [EstadoTurno.CONFIRMADO, EstadoTurno.PENDIENTE] },
+      },
+      include: turnoInclude,
+    });
+
+    type Profesional =
+      TurnoCompleto['detalles'][number]['profesional']['usuario'];
+    const agendas = new Map<
+      number,
+      {
+        usuario: Profesional;
+        confirmados: TurnoAgendaDiaria[];
+        sinConfirmar: TurnoAgendaDiaria[];
+        pendientes: TurnoAgendaDiaria[];
+      }
+    >();
+    for (const turno of turnos) {
+      const { detalles, cliente } = this.formatear(turno);
+      // Once per professional, even if they do several services of the turno.
+      const unoPorProfesional = new Map(
+        turno.detalles.map((d) => [d.profesionalId, d]),
+      );
+      for (const d of unoPorProfesional.values()) {
+        const { usuario } = d.profesional;
+        if (usuario.rol !== Rol.PROFESIONAL || usuario.fechaBaja !== null) {
+          continue;
+        }
+        const agenda = agendas.get(usuario.id) ?? {
+          usuario,
+          confirmados: [],
+          sinConfirmar: [],
+          pendientes: [],
+        };
+        agendas.set(usuario.id, agenda);
+        const suyos = detalles.filter((x) => x.legajo === d.profesionalId);
+        const fila: TurnoAgendaDiaria = {
+          horario: `${suyos[0].horaInicio}–${suyos[suyos.length - 1].horaFin}`,
+          cliente: `${cliente.nombre} ${cliente.apellido}`,
+          telefono: cliente.telefono,
+          servicios: suyos.map((x) => x.servicio).join(', '),
+          alergia: cliente.alergia ?? '',
+        };
+        const grupo =
+          turno.estado === EstadoTurno.PENDIENTE
+            ? agenda.pendientes
+            : turno.asistenciaConfirmadaEn
+              ? agenda.confirmados
+              : agenda.sinConfirmar;
+        grupo.push(fila);
+      }
+    }
+
+    // inicioTurno holds the agenda's date for AGENDA_DIARIA.
+    const yaRecibieron = new Set(
+      (
+        await this.prisma.notificacion.findMany({
+          where: {
+            tipo: TipoNotificacion.AGENDA_DIARIA,
+            estadoEnvio: EstadoEnvio.ENVIADO,
+            inicioTurno: dia,
+          },
+          select: { usuarioId: true },
+        })
+      ).map((n) => n.usuarioId),
+    );
+
+    const porHora = (a: TurnoAgendaDiaria, b: TurnoAgendaDiaria) =>
+      a.horario.localeCompare(b.horario);
+    let enviados = 0;
+    for (const {
+      usuario,
+      confirmados,
+      sinConfirmar,
+      pendientes,
+    } of agendas.values()) {
+      if (yaRecibieron.has(usuario.id)) {
+        continue;
+      }
+      const grupos = [
+        {
+          titulo: 'Asistencia confirmada',
+          color: '#2E7D32',
+          turnos: confirmados,
+        },
+        {
+          titulo: 'Sin confirmar asistencia',
+          color: '#F98D56',
+          turnos: sinConfirmar,
+        },
+        {
+          titulo: 'Solicitudes para aceptar',
+          color: '#737373',
+          turnos: pendientes,
+        },
+      ]
+        .filter((g) => g.turnos.length > 0)
+        .map((g) => ({ ...g, turnos: [...g.turnos].sort(porHora) }));
+
+      let estadoEnvio: EstadoEnvio = EstadoEnvio.ENVIADO;
+      try {
+        await this.mailService.sendAgendaDiaria(usuario.email, {
+          nombre: usuario.nombre,
+          fecha: this.fechaLarga(fecha),
+          grupos,
+        });
+        enviados++;
+      } catch (error) {
+        estadoEnvio = EstadoEnvio.ERROR;
+        this.logger.error(
+          `Could not send the daily agenda to ${usuario.email}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      }
+      await this.prisma.notificacion.create({
+        data: {
+          usuarioId: usuario.id,
+          medio: MedioNotificacion.EMAIL,
+          tipo: TipoNotificacion.AGENDA_DIARIA,
+          estadoEnvio,
+          inicioTurno: dia,
+        },
+      });
+    }
+    return enviados;
+  }
+
+  /** Tomorrow's date in the salon, "YYYY-MM-DD". */
+  private manana(): string {
+    const hoy = fechaADate(ahoraEnSalon().fecha);
+    return dateAFecha(new Date(hoy.getTime() + 86_400_000));
   }
 
   // The client didn't come: CONFIRMADO → AUSENTE, once the turno is over. No email.

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { TurnosService } from './turnos.service';
 
-// F06: every 15 minutes, reminder emails for the turnos of the next 48 h.
+// F06: every 15 minutes, reminder emails for the turnos of the next 24 h.
 @Injectable()
 export class RecordatoriosCron {
   private readonly logger = new Logger(RecordatoriosCron.name);

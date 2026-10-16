@@ -301,8 +301,9 @@ model Notificacion {
   tipo        TipoNotificacion
   estadoEnvio EstadoEnvio
   fechaEnvio  DateTime          @default(now())
-  // Start of the turno it was sent for (local wall-clock, like inicioDia). If the turno is
-  // rescheduled it no longer matches: the old link stops working and a new reminder goes out.
+  // RECORDATORIO: start of the turno it was sent for (local wall-clock, like inicioDia). If the
+  // turno is rescheduled it no longer matches: the old link stops working and a new one goes out.
+  // AGENDA_DIARIA: the date of the agenda, so it is not sent twice for the same day.
   inicioTurno DateTime?
   // SHA-256 of the confirm/cancel link token (reminder only).
   tokenHash   String?           @unique @db.Char(64)
