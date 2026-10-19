@@ -85,8 +85,9 @@ model Cliente {
   // File name of the profile photo inside UPLOADS_DIR.
   foto      String? @db.VarChar(100)
 
-  usuario Usuario @relation(fields: [usuarioId], references: [id])
+  usuario Usuario      @relation(fields: [usuarioId], references: [id])
   turnos  Turno[]
+  series  SerieTurno[]
 }
 
 model Profesional {
@@ -99,6 +100,7 @@ model Profesional {
   servicios       ProfesionalServicio[]
   disponibilidad  DisponibilidadHoraria[]
   detallesDeTurno TurnoDetalle[]
+  series          SerieTurno[]
 }
 
 // Times of day are "HH:mm" strings in the salon's local time, so there are no time zone shifts.
@@ -120,6 +122,7 @@ model Servicio {
 
   profesionales   ProfesionalServicio[]
   detallesDeTurno TurnoDetalle[]
+  series          SerieTurno[]
 }
 
 // Services a professional can do. Removing one sets fechaBaja; assigning it again clears it.
@@ -163,12 +166,61 @@ model Turno {
   motivo                 String?     @db.VarChar(500)
   // When the client confirmed they will come (from the app or the reminder). Reset on rescheduling.
   asistenciaConfirmadaEn DateTime?
+  // F05: the series this turno belongs to (created with it, or booked by the client for one of its dates).
+  serieId                Int?
 
   cliente        Cliente        @relation(fields: [clienteId], references: [usuarioId])
+  serie          SerieTurno?    @relation("TurnosDeLaSerie", fields: [serieId], references: [id])
   detalles       TurnoDetalle[]
   notificaciones Notificacion[]
+  // Series created from this turno.
+  seriesOrigen   SerieTurno[]   @relation("OrigenDeLaSerie")
 
   @@index([fecha])
+}
+
+// SEMANAL 7 days, QUINCENAL 14, CADA_20_DIAS 20, MENSUAL every 4 weeks (28).
+enum FrecuenciaSerie {
+  SEMANAL
+  QUINCENAL
+  CADA_20_DIAS
+  MENSUAL
+}
+
+// SUSPENDIDA and BAJA cancel the future turnos of the series; reactivating creates them again.
+enum EstadoSerie {
+  ACTIVA
+  SUSPENDIDA
+  BAJA
+}
+
+// F05: a professional repeats one service of a CONFIRMADO turno, same time, every N days,
+// up to 60 days ahead (the booking window). Its dates are fechaInicio + N, + 2N... until fechaFin.
+model SerieTurno {
+  id            Int             @id @default(autoincrement())
+  clienteId     Int
+  // Legajo of the professional (who does the service and manages the series).
+  profesionalId Int
+  servicioId    Int
+  frecuencia    FrecuenciaSerie
+  // "HH:mm", the time of the original turno.
+  horaInicio    String          @db.Char(5)
+  // First date of the series (the original turno's date + the frequency) and last possible one.
+  fechaInicio   DateTime        @db.Date
+  fechaFin      DateTime        @db.Date
+  estado        EstadoSerie     @default(ACTIVA)
+  turnoOrigenId Int
+  creadaEn      DateTime        @default(now())
+
+  cliente     Cliente     @relation(fields: [clienteId], references: [usuarioId])
+  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
+  servicio    Servicio    @relation(fields: [servicioId], references: [id])
+  turnoOrigen Turno       @relation("OrigenDeLaSerie", fields: [turnoOrigenId], references: [id])
+  turnos      Turno[]     @relation("TurnosDeLaSerie")
+
+  @@index([clienteId])
+  @@index([profesionalId])
+  @@index([turnoOrigenId])
 }
 
 // One row per service. Services run one after another in id order, each with its own professional.

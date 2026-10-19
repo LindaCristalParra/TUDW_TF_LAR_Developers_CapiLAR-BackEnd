@@ -41,6 +41,20 @@ export interface MailAgendaDiaria {
   grupos: { titulo: string; color: string; turnos: TurnoAgendaDiaria[] }[];
 }
 
+/** Context of templates/serie.hbs (F05): the dates of a series, one line each. */
+export interface MailSerie {
+  titulo: string;
+  nombre: string;
+  mensaje: string;
+  // e.g. "Corte con Flor Fichera, cada semana a las 10:00"
+  resumen: string;
+  // fecha e.g. "martes 8 de octubre"; detalle e.g. "10:00 · Confirmado"
+  fechas: { fecha: string; detalle: string }[];
+  boton: string;
+  // Front-end path the button opens, e.g. "/mis-turnos"
+  ruta: string;
+}
+
 @Injectable()
 export class MailService {
   constructor(
@@ -83,6 +97,21 @@ export class MailService {
           ? `${frontendUrl}${contenido.rutaSecundaria}`
           : '',
       },
+    });
+  }
+
+  async sendSerie(
+    email: string,
+    asunto: string,
+    contenido: MailSerie,
+  ): Promise<void> {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+
+    await this.mailerService.sendMail({
+      to: email,
+      subject: asunto,
+      template: 'serie',
+      context: { ...contenido, link: `${frontendUrl}${contenido.ruta}` },
     });
   }
 

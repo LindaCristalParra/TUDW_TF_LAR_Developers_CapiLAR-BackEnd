@@ -59,7 +59,9 @@ export class TurnosController {
    *
    * @remarks CLIENTE: solicita un turno para sí (queda PENDIENTE y ocupa el
    * horario). PROFESIONAL: carga un turno para un cliente con `clienteId`
-   * (queda CONFIRMADO). 409 si el horario no está disponible.
+   * (queda CONFIRMADO). CLIENTE con `serieId`: reserva una fecha de su serie que
+   * estaba ocupada, en otro horario de ese día (queda CONFIRMADO y en la serie).
+   * 409 si el horario no está disponible.
    */
   @Post()
   @Roles(Rol.CLIENTE, Rol.PROFESIONAL)
