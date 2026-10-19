@@ -175,6 +175,7 @@ export class UsersService {
               { nombre: { contains: search } },
               { apellido: { contains: search } },
               { email: { contains: search } },
+              { telefono: { contains: search } },
             ]
           : undefined,
       },
