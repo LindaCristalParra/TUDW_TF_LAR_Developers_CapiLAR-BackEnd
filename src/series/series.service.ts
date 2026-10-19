@@ -25,6 +25,8 @@ import { MailSerie, MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   ContextoAgenda,
+  ESTADOS_CANCELABLES,
+  ESTADOS_OCUPAN,
   MAX_DIAS_ANTICIPACION,
   cargarContexto,
   horariosLibres,
@@ -32,6 +34,7 @@ import {
 } from '../turnos/agenda';
 import { PublicUser } from '../users/users.service';
 import { CreateSerieDto } from './dto/create-serie.dto';
+import { MotivoSerieDto } from './dto/motivo-serie.dto';
 
 type Db = Prisma.TransactionClient;
 
@@ -83,6 +86,36 @@ interface PlanSerie {
   fechas: FechaPlanificada[];
 }
 
+const serieInclude = {
+  cliente: {
+    select: {
+      usuario: {
+        select: { id: true, nombre: true, apellido: true, email: true },
+      },
+    },
+  },
+  profesional: {
+    select: {
+      usuario: { select: { nombre: true, apellido: true, email: true } },
+    },
+  },
+  servicio: { select: { tipo: true } },
+  turnos: {
+    orderBy: [{ fecha: 'asc' }, { horaInicio: 'asc' }],
+    select: {
+      id: true,
+      fecha: true,
+      horaInicio: true,
+      horaFin: true,
+      estado: true,
+    },
+  },
+} satisfies Prisma.SerieTurnoInclude;
+
+type SerieCompleta = Prisma.SerieTurnoGetPayload<{
+  include: typeof serieInclude;
+}>;
+
 // Serializable, like booking a turno: nobody can take one of the dates meanwhile.
 const TX_SERIALIZABLE = {
   isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
@@ -93,6 +126,15 @@ function sumarDias(fecha: string, dias: number): string {
   const date = fechaADate(fecha);
   date.setUTCDate(date.getUTCDate() + dias);
   return dateAFecha(date);
+}
+
+/** desde, desde + dias, ... while <= hasta. */
+function fechasCada(desde: string, hasta: string, dias: number): string[] {
+  const fechas: string[] = [];
+  for (let fecha = desde; fecha <= hasta; fecha = sumarDias(fecha, dias)) {
+    fechas.push(fecha);
+  }
+  return fechas;
 }
 
 @Injectable()
@@ -140,6 +182,241 @@ export class SeriesService {
         turnoId: turnoIds.get(f.fecha) ?? null,
       })),
     };
+  }
+
+  /** PROFESIONAL: the series they manage. CLIENTE: her own (read only). Newest first. */
+  async findAll(actor: PublicUser) {
+    const series = await this.prisma.serieTurno.findMany({
+      where:
+        actor.rol === Rol.CLIENTE
+          ? { clienteId: actor.id }
+          : { profesionalId: actor.profesional?.legajo ?? -1 },
+      orderBy: { creadaEn: 'desc' },
+      include: serieInclude,
+    });
+    return series.map((s) => this.formatearSerie(s));
+  }
+
+  async findOne(id: number, actor: PublicUser) {
+    return this.formatearSerie(await this.findVisible(id, actor));
+  }
+
+  // ACTIVA → SUSPENDIDA. Cancels the turnos that haven't started; reactivating books them again.
+  async suspender(id: number, dto: MotivoSerieDto, actor: PublicUser) {
+    const serie = await this.findVisible(id, actor);
+    if (serie.estado !== EstadoSerie.ACTIVA) {
+      throw new BadRequestException('Solo se pueden suspender series activas');
+    }
+    await this.cortar(serie, EstadoSerie.SUSPENDIDA, dto.motivo || null);
+    return this.findOne(id, actor);
+  }
+
+  // ACTIVA or SUSPENDIDA → BAJA, for good. Cancels the turnos that haven't started.
+  async baja(id: number, dto: MotivoSerieDto, actor: PublicUser) {
+    const serie = await this.findVisible(id, actor);
+    if (serie.estado === EstadoSerie.BAJA) {
+      throw new BadRequestException('La serie ya está dada de baja');
+    }
+    await this.cortar(serie, EstadoSerie.BAJA, dto.motivo || null);
+    return this.findOne(id, actor);
+  }
+
+  /**
+   * SUSPENDIDA → ACTIVA. Books again, with the same rules as creating it, every date still
+   * ahead that has no turno of the series (dates the client canceled herself are not offered again).
+   */
+  async reactivar(id: number, actor: PublicUser) {
+    const serie = await this.findVisible(id, actor);
+    if (serie.estado !== EstadoSerie.SUSPENDIDA) {
+      throw new BadRequestException(
+        'Solo se pueden reactivar series suspendidas',
+      );
+    }
+    const plan = await this.enTransaccion(async (tx) => {
+      const actual = await tx.serieTurno.findUniqueOrThrow({
+        where: { id },
+        include: serieInclude,
+      });
+      const hoy = ahoraEnSalon().fecha;
+      const conTurno = new Set(actual.turnos.map((t) => dateAFecha(t.fecha)));
+      const fechas = this.fechasDe(actual).filter(
+        (f) => f > hoy && !conTurno.has(f),
+      );
+      if (!fechas.length) {
+        throw new BadRequestException(
+          'La serie ya no tiene fechas por delante',
+        );
+      }
+      const planificadas = await this.clasificarFechas(
+        tx,
+        {
+          clienteId: actual.clienteId,
+          legajo: actual.profesionalId,
+          servicioId: actual.servicioId,
+          horaInicio: actual.horaInicio,
+        },
+        fechas,
+      );
+      const plan = this.planDeSerie(actual, planificadas);
+      await tx.serieTurno.update({
+        where: { id },
+        data: { estado: EstadoSerie.ACTIVA },
+      });
+      await this.crearTurnos(tx, id, plan);
+      return plan;
+    });
+
+    this.avisarCreada(plan);
+    return this.findOne(id, actor);
+  }
+
+  // Cancels the series' turnos that haven't started and tells the client which ones.
+  private async cortar(
+    serie: SerieCompleta,
+    estado: EstadoSerie,
+    motivo: string | null,
+  ): Promise<void> {
+    const futuros = serie.turnos.filter(
+      (t) => ESTADOS_CANCELABLES.includes(t.estado) && this.noEmpezo(t),
+    );
+    await this.prisma.$transaction([
+      this.prisma.serieTurno.update({
+        where: { id: serie.id },
+        data: { estado },
+      }),
+      this.prisma.turno.updateMany({
+        where: {
+          id: { in: futuros.map((t) => t.id) },
+          estado: { in: ESTADOS_CANCELABLES },
+        },
+        data: {
+          estado: EstadoTurno.CANCELADO,
+          motivo:
+            motivo ??
+            (estado === EstadoSerie.SUSPENDIDA
+              ? 'Se suspendió la serie'
+              : 'Se dio de baja la serie'),
+          // Suspending detaches them, so reactivating books those dates again.
+          ...(estado === EstadoSerie.SUSPENDIDA ? { serieId: null } : {}),
+        },
+      }),
+    ]);
+    if (!futuros.length) return;
+
+    const { usuario } = serie.cliente;
+    const profesional = `${serie.profesional.usuario.nombre} ${serie.profesional.usuario.apellido}`;
+    const accion =
+      estado === EstadoSerie.SUSPENDIDA ? 'suspendió' : 'dio de baja';
+    this.enviar(usuario.email, 'Se cancelaron turnos de tu serie', {
+      titulo: 'Se cancelaron turnos de tu serie',
+      nombre: usuario.nombre,
+      mensaje: `${profesional} ${accion} tu serie de turnos${motivo ? `. Motivo: "${motivo}"` : ''}. Estos turnos quedaron cancelados; si querés, podés pedir otros desde la app.`,
+      resumen: this.resumen(serie.servicio.tipo, profesional, serie),
+      fechas: futuros.map((t) => ({
+        fecha: this.fechaLarga(dateAFecha(t.fecha)),
+        detalle: `${t.horaInicio} · Cancelado`,
+      })),
+      boton: 'PEDIR OTRO TURNO',
+      ruta: '/mis-turnos',
+    });
+  }
+
+  // 404 for series of other clients or professionals (ids don't leak).
+  private async findVisible(
+    id: number,
+    actor: PublicUser,
+  ): Promise<SerieCompleta> {
+    const serie = await this.prisma.serieTurno.findUnique({
+      where: { id },
+      include: serieInclude,
+    });
+    const visible =
+      serie &&
+      (actor.rol === Rol.CLIENTE
+        ? serie.clienteId === actor.id
+        : serie.profesionalId === actor.profesional?.legajo);
+    if (!visible) {
+      throw new NotFoundException('Serie no encontrada');
+    }
+    return serie;
+  }
+
+  // Every date of the series, with its turno: the active one, or the last one if all were canceled.
+  // A date without turno is OCUPADA (the client can book another time that day) or the series is SUSPENDIDA.
+  private formatearSerie(serie: SerieCompleta) {
+    return {
+      id: serie.id,
+      estado: serie.estado,
+      turnoOrigenId: serie.turnoOrigenId,
+      cliente: {
+        id: serie.cliente.usuario.id,
+        nombre: serie.cliente.usuario.nombre,
+        apellido: serie.cliente.usuario.apellido,
+      },
+      legajo: serie.profesionalId,
+      profesional: `${serie.profesional.usuario.nombre} ${serie.profesional.usuario.apellido}`,
+      servicioId: serie.servicioId,
+      servicio: serie.servicio.tipo,
+      frecuencia: serie.frecuencia,
+      horaInicio: serie.horaInicio,
+      fechaInicio: dateAFecha(serie.fechaInicio),
+      fechaFin: dateAFecha(serie.fechaFin),
+      fechas: this.fechasDe(serie).map((fecha) => {
+        const delDia = serie.turnos.filter(
+          (t) => dateAFecha(t.fecha) === fecha,
+        );
+        const turno =
+          delDia.find((t) => ESTADOS_OCUPAN.includes(t.estado)) ??
+          delDia.at(-1);
+        return {
+          fecha,
+          turno: turno
+            ? {
+                id: turno.id,
+                horaInicio: turno.horaInicio,
+                horaFin: turno.horaFin,
+                estado: turno.estado,
+              }
+            : null,
+        };
+      }),
+    };
+  }
+
+  private fechasDe(serie: SerieCompleta): string[] {
+    return fechasCada(
+      dateAFecha(serie.fechaInicio),
+      dateAFecha(serie.fechaFin),
+      DIAS_FRECUENCIA[serie.frecuencia],
+    );
+  }
+
+  private planDeSerie(
+    serie: SerieCompleta,
+    fechas: FechaPlanificada[],
+  ): PlanSerie {
+    return {
+      turnoOrigenId: serie.turnoOrigenId,
+      clienteId: serie.clienteId,
+      cliente: serie.cliente.usuario,
+      legajo: serie.profesionalId,
+      profesional: serie.profesional.usuario,
+      servicioId: serie.servicioId,
+      servicio: serie.servicio.tipo,
+      frecuencia: serie.frecuencia,
+      horaInicio: serie.horaInicio,
+      fechaFin: dateAFecha(serie.fechaFin),
+      fechas,
+    };
+  }
+
+  private noEmpezo(turno: { fecha: Date; horaInicio: string }): boolean {
+    const ahora = ahoraEnSalon();
+    const fecha = dateAFecha(turno.fecha);
+    return (
+      fecha > ahora.fecha ||
+      (fecha === ahora.fecha && aMinutos(turno.horaInicio) > ahora.minutos)
+    );
   }
 
   // One turno per LIBRE or SIN_HORARIO date (OCUPADA ones are booked by the client later).
@@ -262,27 +539,16 @@ export class SeriesService {
       dto.frecuencia,
       dto.fechaFin,
     );
-    const items = [
-      { servicioId: detalle.servicioId, legajo: detalle.profesionalId },
-    ];
-    const planificadas: FechaPlanificada[] = [];
-    for (const fecha of fechas) {
-      const ctx = await cargarContexto(db, fecha, items, {
+    const planificadas = await this.clasificarFechas(
+      db,
+      {
         clienteId: turno.clienteId,
-      });
-      const { estado, motivo } = this.clasificar(
-        ctx,
+        legajo: detalle.profesionalId,
+        servicioId: detalle.servicioId,
         horaInicio,
-        detalle.profesionalId,
-      );
-      planificadas.push({
-        fecha,
-        estado,
-        motivo,
-        horariosLibres: estado === 'OCUPADA' ? horariosLibres(ctx) : [],
-        ctx,
-      });
-    }
+      },
+      fechas,
+    );
 
     return {
       turnoOrigenId: turno.id,
@@ -315,20 +581,47 @@ export class SeriesService {
       );
     }
     const dias = DIAS_FRECUENCIA[frecuencia];
-    const fechas: string[] = [];
-    for (
-      let fecha = sumarDias(fechaOrigen, dias);
-      fecha <= fechaFin;
-      fecha = sumarDias(fecha, dias)
-    ) {
-      if (fecha > hoy) fechas.push(fecha);
-    }
-    if (!fechas.length) {
+    const fechas = fechasCada(sumarDias(fechaOrigen, dias), fechaFin, dias);
+    const futuras = fechas.filter((f) => f > hoy);
+    if (!futuras.length) {
       throw new BadRequestException(
         'Con esa fecha de fin la serie no tiene ninguna fecha',
       );
     }
-    return fechas;
+    return futuras;
+  }
+
+  // Checks each date against the agenda (professional and client) at the series' time.
+  private async clasificarFechas(
+    db: Db,
+    base: {
+      clienteId: number;
+      legajo: number;
+      servicioId: number;
+      horaInicio: string;
+    },
+    fechas: string[],
+  ): Promise<FechaPlanificada[]> {
+    const items = [{ servicioId: base.servicioId, legajo: base.legajo }];
+    const planificadas: FechaPlanificada[] = [];
+    for (const fecha of fechas) {
+      const ctx = await cargarContexto(db, fecha, items, {
+        clienteId: base.clienteId,
+      });
+      const { estado, motivo } = this.clasificar(
+        ctx,
+        base.horaInicio,
+        base.legajo,
+      );
+      planificadas.push({
+        fecha,
+        estado,
+        motivo,
+        horariosLibres: estado === 'OCUPADA' ? horariosLibres(ctx) : [],
+        ctx,
+      });
+    }
+    return planificadas;
   }
 
   private clasificar(
@@ -387,7 +680,7 @@ export class SeriesService {
   // The client gets every date; the professional, the days without working hours (if any).
   private avisarCreada(plan: PlanSerie): void {
     const profesional = `${plan.profesional.nombre} ${plan.profesional.apellido}`;
-    const resumen = `${plan.servicio} con ${profesional}, ${TEXTO_FRECUENCIA[plan.frecuencia]} a las ${plan.horaInicio}`;
+    const resumen = this.resumen(plan.servicio, profesional, plan);
     const ocupadas = plan.fechas.some((f) => f.estado === 'OCUPADA');
 
     this.enviar(plan.cliente.email, 'Tus próximos turnos', {
@@ -420,6 +713,15 @@ export class SeriesService {
         ruta: '/agenda',
       });
     }
+  }
+
+  /** "Corte con Flor Serie, cada semana a las 10:00" */
+  private resumen(
+    servicio: string,
+    profesional: string,
+    serie: { frecuencia: FrecuenciaSerie; horaInicio: string },
+  ): string {
+    return `${servicio} con ${profesional}, ${TEXTO_FRECUENCIA[serie.frecuencia]} a las ${serie.horaInicio}`;
   }
 
   private detalleParaCliente(f: FechaPlanificada, hora: string): string {

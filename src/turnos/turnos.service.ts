@@ -32,6 +32,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { PublicUser } from '../users/users.service';
 import { VerificacionEmailService } from '../users/verificacion-email.service';
 import {
+  ESTADOS_CANCELABLES,
   ItemTurno,
   assertDisponible,
   cargarContexto,
@@ -54,13 +55,6 @@ const HORAS_RECORDATORIO = 24;
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
-
-// States a turno can still be canceled from.
-const ESTADOS_CANCELABLES: EstadoTurno[] = [
-  EstadoTurno.PENDIENTE,
-  EstadoTurno.CONFIRMADO,
-  EstadoTurno.REPROGRAMADO,
-];
 
 const turnoInclude = {
   detalles: {

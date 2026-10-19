@@ -28,6 +28,13 @@ export const ESTADOS_OCUPAN: EstadoTurno[] = [
   EstadoTurno.AUSENTE,
 ];
 
+// States a turno can still be canceled from.
+export const ESTADOS_CANCELABLES: EstadoTurno[] = [
+  EstadoTurno.PENDIENTE,
+  EstadoTurno.CONFIRMADO,
+  EstadoTurno.REPROGRAMADO,
+];
+
 type Db = Prisma.TransactionClient;
 
 /** One service of a turno, done by one professional. */
