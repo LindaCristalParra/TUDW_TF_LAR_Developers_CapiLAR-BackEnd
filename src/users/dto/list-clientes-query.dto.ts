@@ -4,7 +4,7 @@ import { Trim } from '../../auth/dto/trim.decorator';
 // Query string of GET /users/clientes. Decorators run bottom-up (see stopAtFirstError in main.ts).
 export class ListClientesQueryDto {
   /**
-   * Busca en nombre, apellido o email. No distingue mayúsculas ni tildes.
+   * Busca en nombre, apellido, email o teléfono. No distingue mayúsculas ni tildes.
    * @example "alvarez"
    */
   @MaxLength(100, {
