@@ -82,6 +82,8 @@ const turnoInclude = {
           },
         },
       },
+      // The active technical record of this service (at most one, see FichaTecnica).
+      fichas: { where: { fechaBaja: null }, select: { id: true }, take: 1 },
     },
   },
   cliente: {
@@ -244,7 +246,7 @@ export class TurnosService {
         'El salón te cargó un turno en CapiLAR. Verificá tu email con este botón para poder reservar vos misma desde la app.',
       );
     }
-    return this.formatear(turno);
+    return this.formatear(turno, { paraCliente: esCliente });
   }
 
   async findMios(actor: PublicUser) {
@@ -981,6 +983,8 @@ export class TurnosService {
         horaInicio: aHora(inicio),
         horaFin: aHora(minuto),
         precioBase: d.precioBase,
+        // Salon only: the client sees her records in GET /fichas/mias.
+        ...(opciones.paraCliente ? {} : { fichaId: d.fichas[0]?.id ?? null }),
       };
     });
     const { usuario, alergia } = turno.cliente;

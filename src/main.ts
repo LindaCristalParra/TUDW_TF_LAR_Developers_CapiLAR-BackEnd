@@ -1,9 +1,19 @@
-import { ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import { ValidationError } from 'class-validator';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+
+// The messages of every field, nested ones included. Nest's default would prefix the nested
+// ones with their path ("formulas.0.El volumen..."); the messages already say which field it is.
+function mensajes(errores: ValidationError[]): string[] {
+  return errores.flatMap((error) => [
+    ...Object.values(error.constraints ?? {}),
+    ...mensajes(error.children ?? []),
+  ]);
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {});
@@ -29,6 +39,9 @@ async function bootstrap() {
       transform: true,
       // One message per field. Validators run bottom-up, so DTOs list the basic rule last.
       stopAtFirstError: true,
+      // Without duplicates: the same mistake in two formulas is shown once.
+      exceptionFactory: (errores) =>
+        new BadRequestException([...new Set(mensajes(errores))]),
     }),
   );
 
