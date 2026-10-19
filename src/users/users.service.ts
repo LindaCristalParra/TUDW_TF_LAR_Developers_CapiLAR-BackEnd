@@ -35,7 +35,6 @@ export type PublicUser = Omit<
   | 'contrasena'
   | 'resetToken'
   | 'resetTokenExpira'
-  | 'refreshToken'
   | 'verificacionToken'
   | 'verificacionTokenExpira'
   | 'fechaNacimiento'
@@ -58,6 +57,16 @@ const clienteResumenSelect = {
 export type ClienteResumen = Prisma.UsuarioGetPayload<{
   select: typeof clienteResumenSelect;
 }>;
+
+// Nested write for usuario.update: closes every open session (all devices).
+function revocarSesiones() {
+  return {
+    updateMany: {
+      where: { revocadaEn: null },
+      data: { revocadaEn: new Date() },
+    },
+  } satisfies Prisma.SesionUpdateManyWithoutUsuarioNestedInput;
+}
 
 @Injectable()
 export class UsersService {
@@ -243,7 +252,7 @@ export class UsersService {
         fechaBaja: new Date(),
         resetToken: null,
         resetTokenExpira: null,
-        refreshToken: null,
+        sesiones: revocarSesiones(),
       },
     });
   }
@@ -356,7 +365,6 @@ export class UsersService {
       contrasena: _contrasena,
       resetToken: _resetToken,
       resetTokenExpira: _resetTokenExpira,
-      refreshToken: _refreshToken,
       verificacionToken: _verificacionToken,
       verificacionTokenExpira: _verificacionTokenExpira,
       fechaNacimiento,
@@ -393,19 +401,11 @@ export class UsersService {
     });
   }
 
-  // null logs the user out (the current refresh token stops working).
-  async setRefreshToken(id: number, tokenHash: string | null): Promise<void> {
-    await this.prisma.usuario.update({
-      where: { id },
-      data: { refreshToken: tokenHash },
-    });
-  }
-
   findByResetToken(tokenHash: string): Promise<Usuario | null> {
     return this.prisma.usuario.findFirst({ where: { resetToken: tokenHash } });
   }
 
-  // Clears the reset token too, so each token can only be used once, and closes the
+  // Clears the reset token too, so each token can only be used once, and closes every
   // session: whoever had the old password has to log in again.
   updatePassword(id: number, contrasenaHash: string): Promise<Usuario> {
     return this.prisma.usuario.update({
@@ -414,7 +414,7 @@ export class UsersService {
         contrasena: contrasenaHash,
         resetToken: null,
         resetTokenExpira: null,
-        refreshToken: null,
+        sesiones: revocarSesiones(),
       },
     });
   }

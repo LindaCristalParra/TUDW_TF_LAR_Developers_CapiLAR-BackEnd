@@ -11,6 +11,7 @@ import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
 import { Rol } from '../generated/prisma/client';
 import { MailService } from '../mail/mail.service';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   PublicUser,
   UsersService,
@@ -44,15 +45,16 @@ export interface Sesion extends AuthResponse {
 
 interface RefreshPayload {
   sub: number;
-  // Session id: created at login, kept when the token rotates.
+  // Session id (Sesion.sid): created at login, kept when the token rotates.
   sid: string;
   // Random, so two tokens issued in the same second are still different.
   jti: string;
 }
 
-// Usuario.refreshToken holds "<sid>:<sha256 of the token>".
-function guardado(sid: string, token: string): string {
-  return `${sid}:${hashToken(token)}`;
+// The session being rotated: its sid and the hash of the token that is being replaced.
+interface Rotacion {
+  sid: string;
+  tokenHash: string;
 }
 
 const SESION_VENCIDA = 'Tu sesión venció. Iniciá sesión de nuevo.';
@@ -69,6 +71,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
     private readonly verificacionEmail: VerificacionEmailService,
+    private readonly prisma: PrismaService,
     configService: ConfigService,
   ) {
     this.refreshSecret = configService.getOrThrow<string>('JWT_REFRESH_SECRET');
@@ -125,34 +128,49 @@ export class AuthService {
   }
 
   // Rotation: every refresh token works once and is replaced by a new one.
+  // Only this device's session is involved; the others stay as they are.
   async refresh(token: string | undefined): Promise<Sesion> {
     const payload = await this.verificarRefresh(token);
-    const user = payload && (await this.usersService.findById(payload.sub));
+    const sesion =
+      payload &&
+      (await this.prisma.sesion.findUnique({ where: { sid: payload.sid } }));
+    if (
+      !sesion ||
+      sesion.usuarioId !== payload.sub ||
+      sesion.revocadaEn !== null ||
+      sesion.vence <= new Date()
+    ) {
+      throw new UnauthorizedException(SESION_VENCIDA);
+    }
+    const tokenHash = hashToken(token!);
+    if (sesion.tokenHash !== tokenHash) {
+      // An old token of this session was used again: someone may have a copy, so the session ends.
+      this.logger.warn(`Reused refresh token for user ${sesion.usuarioId}`);
+      await this.revocar(sesion.sid);
+      throw new UnauthorizedException(SESION_VENCIDA);
+    }
+    const user = await this.usersService.findById(sesion.usuarioId);
     if (!user || user.fechaBaja !== null) {
       throw new UnauthorizedException(SESION_VENCIDA);
     }
-    if (user.refreshToken !== guardado(payload.sid, token!)) {
-      // An old token of the current session was used again: someone may have a copy, so
-      // the session ends. A token of an older session (replaced by a new login) just fails.
-      if (user.refreshToken?.startsWith(`${payload.sid}:`)) {
-        this.logger.warn(`Reused refresh token for user ${user.id}`);
-        await this.usersService.setRefreshToken(user.id, null);
-      }
-      throw new UnauthorizedException(SESION_VENCIDA);
-    }
-    return this.crearSesion(user, payload.sid);
+    return this.crearSesion(user, { sid: sesion.sid, tokenHash });
   }
 
-  // Always succeeds: an invalid or old token just has nothing to close.
+  // Closes this device's session only. Always succeeds: an invalid or old token has nothing to close.
   async logout(token: string | undefined): Promise<void> {
     const payload = await this.verificarRefresh(token);
     if (!payload) {
       return;
     }
-    const user = await this.usersService.findById(payload.sub);
-    if (user && user.refreshToken === guardado(payload.sid, token!)) {
-      await this.usersService.setRefreshToken(user.id, null);
-    }
+    await this.prisma.sesion.updateMany({
+      where: {
+        sid: payload.sid,
+        usuarioId: payload.sub,
+        tokenHash: hashToken(token!),
+        revocadaEn: null,
+      },
+      data: { revocadaEn: new Date() },
+    });
   }
 
   async forgotPassword(email: string): Promise<void> {
@@ -202,7 +220,7 @@ export class AuthService {
     return this.verificacionEmail.verificar(token);
   }
 
-  // Logged in. Closes the session on other devices and starts a new one here,
+  // Logged in. Closes the sessions on every device and starts a new one here,
   // so whoever changes it doesn't have to log in again.
   async changePassword(
     userId: number,
@@ -228,12 +246,13 @@ export class AuthService {
     return this.crearSesion(user);
   }
 
-  // New access + refresh token. Saving it replaces the previous one (one session per user).
-  // Without sid it's a new login; with it, a rotation of that session.
+  // New access + refresh token. Without rotacion it's a new login: a new Sesion row, and the
+  // user's other sessions (other devices) stay open. With it, the token of that session is replaced.
   private async crearSesion(
     user: UsuarioConPerfil,
-    sid = randomBytes(16).toString('hex'),
+    rotacion?: Rotacion,
   ): Promise<Sesion> {
+    const sid = rotacion?.sid ?? randomBytes(16).toString('hex');
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
@@ -248,15 +267,36 @@ export class AuthService {
       secret: this.refreshSecret,
       expiresIn: `${this.refreshDias}d`,
     });
-    await this.usersService.setRefreshToken(
-      user.id,
-      guardado(sid, refreshToken),
-    );
+    const tokenHash = hashToken(refreshToken);
+    const vence = new Date(Date.now() + this.refreshDias * 24 * 60 * 60 * 1000);
+
+    if (rotacion) {
+      // Only if the token wasn't replaced or revoked in the meantime (two refreshes at once).
+      const { count } = await this.prisma.sesion.updateMany({
+        where: { sid, tokenHash: rotacion.tokenHash, revocadaEn: null },
+        data: { tokenHash, vence },
+      });
+      if (count === 0) {
+        throw new UnauthorizedException(SESION_VENCIDA);
+      }
+    } else {
+      await this.prisma.sesion.create({
+        data: { sid, usuarioId: user.id, tokenHash, vence },
+      });
+    }
+
     return {
       accessToken: await this.jwtService.signAsync(payload),
       refreshToken,
       user: this.usersService.toPublic(user),
     };
+  }
+
+  private async revocar(sid: string): Promise<void> {
+    await this.prisma.sesion.updateMany({
+      where: { sid, revocadaEn: null },
+      data: { revocadaEn: new Date() },
+    });
   }
 
   // null when the token is missing, malformed, expired or not signed by us.
