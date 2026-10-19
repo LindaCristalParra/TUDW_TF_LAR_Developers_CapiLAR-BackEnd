@@ -7,6 +7,7 @@ import { AuthModule } from './auth/auth.module';
 import { FichasModule } from './fichas/fichas.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProfesionalesModule } from './profesionales/profesionales.module';
+import { SeriesModule } from './series/series.module';
 import { ServiciosModule } from './servicios/servicios.module';
 import { TurnosModule } from './turnos/turnos.module';
 
@@ -21,6 +22,7 @@ import { TurnosModule } from './turnos/turnos.module';
     ProfesionalesModule,
     TurnosModule,
     FichasModule,
+    SeriesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
