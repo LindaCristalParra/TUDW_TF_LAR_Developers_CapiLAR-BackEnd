@@ -35,15 +35,14 @@ import {
 import { PublicUser } from '../users/users.service';
 import { CreateSerieDto } from './dto/create-serie.dto';
 import { MotivoSerieDto } from './dto/motivo-serie.dto';
+import {
+  DIAS_FRECUENCIA,
+  fechasCada,
+  fechasDeSerie,
+  sumarDias,
+} from './fechas-serie';
 
 type Db = Prisma.TransactionClient;
-
-export const DIAS_FRECUENCIA: Record<FrecuenciaSerie, number> = {
-  SEMANAL: 7,
-  QUINCENAL: 14,
-  CADA_20_DIAS: 20,
-  MENSUAL: 28,
-};
 
 const TEXTO_FRECUENCIA: Record<FrecuenciaSerie, string> = {
   SEMANAL: 'cada semana',
@@ -120,22 +119,6 @@ type SerieCompleta = Prisma.SerieTurnoGetPayload<{
 const TX_SERIALIZABLE = {
   isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
 };
-
-/** "2026-10-07" + 7 -> "2026-10-14" */
-function sumarDias(fecha: string, dias: number): string {
-  const date = fechaADate(fecha);
-  date.setUTCDate(date.getUTCDate() + dias);
-  return dateAFecha(date);
-}
-
-/** desde, desde + dias, ... while <= hasta. */
-function fechasCada(desde: string, hasta: string, dias: number): string[] {
-  const fechas: string[] = [];
-  for (let fecha = desde; fecha <= hasta; fecha = sumarDias(fecha, dias)) {
-    fechas.push(fecha);
-  }
-  return fechas;
-}
 
 @Injectable()
 export class SeriesService {
@@ -239,7 +222,7 @@ export class SeriesService {
       });
       const hoy = ahoraEnSalon().fecha;
       const conTurno = new Set(actual.turnos.map((t) => dateAFecha(t.fecha)));
-      const fechas = this.fechasDe(actual).filter(
+      const fechas = fechasDeSerie(actual).filter(
         (f) => f > hoy && !conTurno.has(f),
       );
       if (!fechas.length) {
@@ -361,7 +344,7 @@ export class SeriesService {
       horaInicio: serie.horaInicio,
       fechaInicio: dateAFecha(serie.fechaInicio),
       fechaFin: dateAFecha(serie.fechaFin),
-      fechas: this.fechasDe(serie).map((fecha) => {
+      fechas: fechasDeSerie(serie).map((fecha) => {
         const delDia = serie.turnos.filter(
           (t) => dateAFecha(t.fecha) === fecha,
         );
@@ -381,14 +364,6 @@ export class SeriesService {
         };
       }),
     };
-  }
-
-  private fechasDe(serie: SerieCompleta): string[] {
-    return fechasCada(
-      dateAFecha(serie.fechaInicio),
-      dateAFecha(serie.fechaFin),
-      DIAS_FRECUENCIA[serie.frecuencia],
-    );
   }
 
   private planDeSerie(

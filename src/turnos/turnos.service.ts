@@ -9,6 +9,7 @@ import {
 import { createHash, randomBytes } from 'crypto';
 import {
   EstadoEnvio,
+  EstadoSerie,
   EstadoTurno,
   MedioNotificacion,
   Prisma,
@@ -29,6 +30,7 @@ import {
   TurnoAgendaDiaria,
 } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { fechasDeSerie } from '../series/fechas-serie';
 import { PublicUser } from '../users/users.service';
 import { VerificacionEmailService } from '../users/verificacion-email.service';
 import {
@@ -149,6 +151,7 @@ export class TurnosService {
   }
 
   // CLIENTE: for themselves, PENDIENTE only if a service requires evaluation (else CONFIRMADO).
+  // With serieId, a date of her series: always CONFIRMADO (the professional set it up).
   // PROFESIONAL: booking for a client, always CONFIRMADO.
   async create(dto: CreateTurnoDto, actor: PublicUser) {
     const esCliente = actor.rol === Rol.CLIENTE;
@@ -156,6 +159,11 @@ export class TurnosService {
     if (!clienteId) {
       throw new BadRequestException(
         'Indicá el cliente (clienteId) para cargar el turno',
+      );
+    }
+    if (dto.serieId && !esCliente) {
+      throw new ForbiddenException(
+        'Solo la clienta reserva un turno de su serie',
       );
     }
     // F06: a client books by herself only with a verified email. The salon can book for her anyway.
@@ -169,6 +177,9 @@ export class TurnosService {
     }
 
     const turno = await this.enTransaccion(async (tx) => {
+      if (dto.serieId) {
+        await this.assertFechaDeSerie(tx, dto, clienteId);
+      }
       const ctx = await cargarContexto(tx, dto.fecha, dto.items, {
         clienteId,
         reservaElCliente: esCliente,
@@ -184,9 +195,10 @@ export class TurnosService {
           horaFin: aHora(aMinutos(dto.horaInicio) + ctx.duracionTotal),
           metodoPago: dto.metodoPago,
           estado:
-            esCliente && requiereEvaluacion
+            esCliente && requiereEvaluacion && !dto.serieId
               ? EstadoTurno.PENDIENTE
               : EstadoTurno.CONFIRMADO,
+          serieId: dto.serieId,
           detalles: {
             create: ctx.items.map((item) => ({
               servicioId: item.servicioId,
@@ -932,6 +944,42 @@ export class TurnosService {
     const dias =
       (turno.fecha.getTime() - fechaADate(ahora.fecha).getTime()) / 86_400_000;
     return dias * 1440 + aMinutos(hora) - ahora.minutos;
+  }
+
+  // F05: a date of her ACTIVA series that has no turno of the series (it was taken when the
+  // series was set up), with the series' service and professional. Inside the booking transaction.
+  private async assertFechaDeSerie(
+    tx: Prisma.TransactionClient,
+    dto: CreateTurnoDto,
+    clienteId: number,
+  ): Promise<void> {
+    const serie = await tx.serieTurno.findUnique({
+      where: { id: dto.serieId },
+      include: { turnos: { select: { fecha: true } } },
+    });
+    if (!serie || serie.clienteId !== clienteId) {
+      throw new NotFoundException('Serie no encontrada');
+    }
+    if (serie.estado !== EstadoSerie.ACTIVA) {
+      throw new BadRequestException('La serie no está activa');
+    }
+    if (!fechasDeSerie(serie).includes(dto.fecha)) {
+      throw new BadRequestException('Esa fecha no es parte de la serie');
+    }
+    // A date she canceled herself also keeps its turno: it is not offered again.
+    if (serie.turnos.some((t) => dateAFecha(t.fecha) === dto.fecha)) {
+      throw new ConflictException('Esa fecha de la serie ya tiene turno');
+    }
+    const [item] = dto.items;
+    if (
+      dto.items.length !== 1 ||
+      item.servicioId !== serie.servicioId ||
+      item.legajo !== serie.profesionalId
+    ) {
+      throw new BadRequestException(
+        'Para tu serie reservá el mismo servicio con el mismo profesional',
+      );
+    }
   }
 
   private async assertClienteActivo(clienteId: number): Promise<void> {

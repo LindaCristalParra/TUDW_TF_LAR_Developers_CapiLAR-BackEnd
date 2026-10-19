@@ -1,5 +1,5 @@
 import { OmitType } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsEnum, IsInt, IsNotEmpty, IsOptional, Min } from 'class-validator';
 import { IsHora } from '../../common/fecha-hora';
 import { MetodoPago } from '../../generated/prisma/client';
 import { HorariosLibresDto } from './horarios-libres.dto';
@@ -19,4 +19,14 @@ export class CreateTurnoDto extends OmitType(HorariosLibresDto, ['turnoId']) {
   })
   @IsOptional()
   metodoPago?: MetodoPago;
+
+  /**
+   * Solo CLIENTE (F05): reservar una fecha de su serie que estaba ocupada, en otro
+   * horario de ese día. Mismo servicio y profesional que la serie; queda CONFIRMADO.
+   * @example 7
+   */
+  @Min(1, { message: 'La serie no es válida' })
+  @IsInt({ message: 'La serie debe ser un número' })
+  @IsOptional()
+  serieId?: number;
 }
