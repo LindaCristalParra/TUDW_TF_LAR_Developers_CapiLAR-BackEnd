@@ -68,7 +68,8 @@ export class AuthController {
    *
    * @remarks Devuelve el `accessToken` (dura 15 minutos) y el usuario. El refresh token
    * (7 días) va en una cookie httpOnly, o en el body (`refreshToken`) con
-   * `X-Client: mobile`. Iniciar sesión cierra la sesión anterior (una por usuario).
+   * `X-Client: mobile`. Cada inicio de sesión es una sesión aparte (una por
+   * dispositivo): no cierra las que el usuario tenga abiertas en otros lados.
    * 401 con el mismo mensaje si el email no existe, la contraseña es incorrecta o la
    * cuenta está dada de baja.
    */
@@ -88,8 +89,8 @@ export class AuthController {
    *
    * @remarks Cuando el `accessToken` vence (401), devuelve uno nuevo con el refresh token
    * de la cookie (web) o del body (`X-Client: mobile`). El refresh token se rota: el
-   * viejo deja de servir y llega uno nuevo. Usar uno viejo cierra la sesión. 401 si no
-   * hay sesión: hay que iniciar sesión de nuevo.
+   * viejo deja de servir y llega uno nuevo. Usar uno viejo cierra esa sesión (las de
+   * otros dispositivos siguen). 401 si no hay sesión: hay que iniciar sesión de nuevo.
    */
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
@@ -111,8 +112,9 @@ export class AuthController {
   /**
    * Cerrar sesión
    *
-   * @remarks Invalida el refresh token (cookie o body con `X-Client: mobile`) y borra la
-   * cookie. Responde 200 aunque la sesión ya no exista.
+   * @remarks Cierra la sesión de este dispositivo (refresh token de la cookie o del body
+   * con `X-Client: mobile`) y borra la cookie. Las de otros dispositivos siguen abiertas.
+   * Responde 200 aunque la sesión ya no exista.
    */
   @Post('logout')
   @HttpCode(HttpStatus.OK)

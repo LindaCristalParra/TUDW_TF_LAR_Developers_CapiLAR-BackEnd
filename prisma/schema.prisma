@@ -47,8 +47,6 @@ model Usuario {
   fechaBaja               DateTime?
   resetToken              String?
   resetTokenExpira        DateTime?
-  // SHA-256 of the current refresh token: one session per user. null = logged out.
-  refreshToken            String?
   // null = email not verified. A client has to verify it to book by herself.
   emailVerificadoEn       DateTime?
   // SHA-256 of the verification link token (like resetToken), 7 days, single use.
@@ -59,6 +57,25 @@ model Usuario {
   profesional Profesional?
 
   notificaciones Notificacion[]
+  sesiones       Sesion[]
+}
+
+// One per login (device), so the web and the app can be open at the same time.
+// Each refresh rotates the token and keeps the sid. The row stays after logout (revocadaEn).
+model Sesion {
+  // The sid of the refresh token: random, created at login.
+  sid        String    @id @db.Char(32)
+  usuarioId  Int
+  // SHA-256 of the current refresh token of this session.
+  tokenHash  String    @db.Char(64)
+  vence      DateTime
+  // Logout, reuse of an old token, password change or reset, or deactivation. null = active.
+  revocadaEn DateTime?
+  creadaEn   DateTime  @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@index([usuarioId])
 }
 
 // Subtypes of Usuario (DER). They share the user's lifecycle, so no fechaBaja of their own.
