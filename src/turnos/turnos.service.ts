@@ -97,6 +97,11 @@ const turnoInclude = {
       },
     },
   },
+  // The series this turno started (at most one that isn't BAJA, see SeriesService).
+  seriesOrigen: {
+    where: { estado: { not: EstadoSerie.BAJA } },
+    select: { id: true },
+  },
 } satisfies Prisma.TurnoInclude;
 
 type TurnoCompleto = Prisma.TurnoGetPayload<{ include: typeof turnoInclude }>;
@@ -1036,6 +1041,9 @@ export class TurnosService {
       horaInicio: turno.horaInicio,
       horaFin: turno.horaFin,
       estado: turno.estado,
+      // serieId: the series it belongs to. serieOrigenId: the series it started.
+      serieId: turno.serieId,
+      serieOrigenId: turno.seriesOrigen[0]?.id ?? null,
       asistenciaConfirmadaEn: turno.asistenciaConfirmadaEn,
       metodoPago: turno.metodoPago,
       // A rejection reason is internal: never sent to the client. A cancellation reason is.
