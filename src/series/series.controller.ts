@@ -33,7 +33,7 @@ export class SeriesController {
   /**
    * Vista previa de una serie (PROFESIONAL)
    *
-   * @remarks Repite un servicio tuyo de un turno CONFIRMADO, a la misma hora, con la
+   * @remarks Repite un servicio tuyo de un turno CONFIRMADO o COMPLETADO, a la misma hora, con la
    * `frecuencia` elegida hasta `fechaFin` (máx. 60 días desde hoy). No crea nada:
    * devuelve cada fecha como `LIBRE`, `SIN_HORARIO` (no cargaste tu horario ese día;
    * el turno se crea igual) u `OCUPADA` (no se crea; trae `horariosLibres` de ese día

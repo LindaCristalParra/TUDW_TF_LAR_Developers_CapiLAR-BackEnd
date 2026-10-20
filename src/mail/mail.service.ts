@@ -125,7 +125,7 @@ export class MailService {
       to: email,
       subject: `Tu agenda de mañana, ${contenido.fecha}`,
       template: 'agenda-diaria',
-      context: { ...contenido, link: `${frontendUrl}/agenda` },
+      context: { ...contenido, link: `${frontendUrl}/panel/agenda` },
     });
   }
 

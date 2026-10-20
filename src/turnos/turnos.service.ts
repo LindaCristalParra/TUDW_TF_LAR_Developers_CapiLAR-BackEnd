@@ -97,6 +97,11 @@ const turnoInclude = {
       },
     },
   },
+  // The series this turno started (at most one that isn't BAJA, see SeriesService).
+  seriesOrigen: {
+    where: { estado: { not: EstadoSerie.BAJA } },
+    select: { id: true },
+  },
 } satisfies Prisma.TurnoInclude;
 
 type TurnoCompleto = Prisma.TurnoGetPayload<{ include: typeof turnoInclude }>;
@@ -225,7 +230,7 @@ export class TurnosService {
           nombre: profesional.nombre,
           mensaje: `${turno.cliente.usuario.nombre} ${turno.cliente.usuario.apellido} pidió un turno. Entrá a tu agenda para aceptarlo o proponerle otro horario.`,
           boton: 'VER MI AGENDA',
-          ruta: '/agenda',
+          ruta: '/panel/agenda',
         });
       }
     } else {
@@ -239,7 +244,7 @@ export class TurnosService {
             nombre: profesional.nombre,
             mensaje: `${turno.cliente.usuario.nombre} ${turno.cliente.usuario.apellido} reservó un turno y ya quedó confirmado en tu agenda.`,
             boton: 'VER MI AGENDA',
-            ruta: '/agenda',
+            ruta: '/panel/agenda',
           });
         }
       }
@@ -469,7 +474,7 @@ export class TurnosService {
         nombre: profesional.nombre,
         mensaje: `El salón canceló este turno. Motivo: "${motivo}". El horario ya quedó libre en tu agenda.`,
         boton: 'VER MI AGENDA',
-        ruta: '/agenda',
+        ruta: '/panel/agenda',
       });
     }
     return this.formatear(actualizado);
@@ -509,7 +514,7 @@ export class TurnosService {
         nombre: profesional.nombre,
         mensaje: `${nombre} ${apellido} canceló su turno.${motivo ? ` Motivo: "${motivo}".` : ''} El horario ya quedó libre en tu agenda.`,
         boton: 'VER MI AGENDA',
-        ruta: '/agenda',
+        ruta: '/panel/agenda',
       });
     }
     return this.formatear(actualizado, { paraCliente: true });
@@ -1036,6 +1041,9 @@ export class TurnosService {
       horaInicio: turno.horaInicio,
       horaFin: turno.horaFin,
       estado: turno.estado,
+      // serieId: the series it belongs to. serieOrigenId: the series it started.
+      serieId: turno.serieId,
+      serieOrigenId: turno.seriesOrigen[0]?.id ?? null,
       asistenciaConfirmadaEn: turno.asistenciaConfirmadaEn,
       metodoPago: turno.metodoPago,
       // A rejection reason is internal: never sent to the client. A cancellation reason is.

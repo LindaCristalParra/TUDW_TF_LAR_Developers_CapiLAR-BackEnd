@@ -6,7 +6,7 @@ import { FrecuenciaSerie } from '../../generated/prisma/client';
 // Decorators run bottom-up (see stopAtFirstError in main.ts).
 export class CreateSerieDto {
   /**
-   * Turno CONFIRMADO del que sale la serie: se repite su fecha y hora cada tanto.
+   * Turno CONFIRMADO o COMPLETADO del que sale la serie: se repite su fecha y hora cada tanto.
    * @example 15
    */
   @Min(1, { message: 'El turno no es válido' })
