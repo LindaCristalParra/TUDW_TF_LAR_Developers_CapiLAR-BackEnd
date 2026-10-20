@@ -6,10 +6,11 @@ import { AgendaDiariaCron } from './agenda-diaria.cron';
 import { RecordatoriosCron } from './recordatorios.cron';
 import { TurnosController } from './turnos.controller';
 import { TurnosService } from './turnos.service';
+import { WhatsAppWebhookController } from './whatsapp-webhook.controller';
 
 @Module({
   imports: [MailModule, UsersModule, WhatsAppModule],
-  controllers: [TurnosController],
+  controllers: [TurnosController, WhatsAppWebhookController],
   providers: [TurnosService, RecordatoriosCron, AgendaDiariaCron],
 })
 export class TurnosModule {}

@@ -16,7 +16,8 @@ function mensajes(errores: ValidationError[]): string[] {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {});
+  // rawBody: the WhatsApp webhook checks Meta's signature over the exact bytes received.
+  const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // Closed list of allowed origins. Without it, cors() would accept any origin.
   const corsOrigins = app

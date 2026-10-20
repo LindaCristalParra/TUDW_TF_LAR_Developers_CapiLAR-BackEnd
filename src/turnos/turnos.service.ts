@@ -759,6 +759,30 @@ export class TurnosService {
     return this.cancelarComoCliente(await this.turnoDelToken(token), motivo);
   }
 
+  /**
+   * A tap on a button of the WhatsApp reminder: the payload is "CONFIRMAR:<token>" or
+   * "CANCELAR:<token>" (see recordarPorWhatsApp). Returns the text to answer the client, or
+   * null if the payload isn't one of ours. A rule that doesn't allow it (link no longer valid,
+   * turno already canceled...) is answered with its message.
+   */
+  async responderRecordatorio(payload: string): Promise<string | null> {
+    const [accion, token] = payload.split(':');
+    if (!token || (accion !== 'CONFIRMAR' && accion !== 'CANCELAR')) {
+      return null;
+    }
+    try {
+      if (accion === 'CONFIRMAR') {
+        const turno = await this.confirmarPorToken(token);
+        return `¡Gracias! Te esperamos el ${this.fechaLarga(turno.fecha)} a las ${turno.horaInicio}.`;
+      }
+      const turno = await this.cancelarPorToken(token, null);
+      return `Listo, cancelamos tu turno del ${this.fechaLarga(turno.fecha)} a las ${turno.horaInicio}. Si querés otro horario, podés reservarlo desde la app.`;
+    } catch (error) {
+      if (error instanceof BadRequestException) return error.message;
+      throw error;
+    }
+  }
+
   // Valid while the turno is still CONFIRMADO, at the same time, and hasn't started.
   private async turnoDelToken(token: string): Promise<TurnoCompleto> {
     const notificacion = await this.prisma.notificacion.findUnique({

@@ -1,7 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 const GRAPH_URL = 'https://graph.facebook.com/v23.0';
+
+// Constant-time comparison, so the response time doesn't leak how much of a secret matched.
+function iguales(a: string, b: string): boolean {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  return bufA.length === bufB.length && timingSafeEqual(bufA, bufB);
+}
 
 /**
  * Turns a phone as typed by the user ("299 15-555-1234", "0299 5551234", "+54 9 299 555 1234")
@@ -67,6 +75,32 @@ export class WhatsAppService {
       type: 'template',
       template: { name: plantilla, language: { code: idioma }, components },
     });
+  }
+
+  /**
+   * Free text. WhatsApp only delivers it within 24 h of the user's last message (e.g. the
+   * answer to a tap on a reminder button); otherwise Meta rejects it.
+   */
+  async enviarTexto(numero: string, texto: string): Promise<string> {
+    return this.enviar({ to: numero, type: 'text', text: { body: texto } });
+  }
+
+  /** Webhook setup in Meta: GET with hub.mode=subscribe and our verify token. */
+  suscripcionValida(modo?: string, token?: string): boolean {
+    const esperado = this.configService.getOrThrow<string>(
+      'WHATSAPP_VERIFY_TOKEN',
+    );
+    return modo === 'subscribe' && !!token && iguales(token, esperado);
+  }
+
+  /** X-Hub-Signature-256 = "sha256=" + HMAC-SHA256 of the raw body with the app secret. */
+  firmaValida(cuerpo: Buffer | undefined, firma: string | undefined): boolean {
+    if (!cuerpo || !firma) return false;
+    const secreto = this.configService.getOrThrow<string>(
+      'WHATSAPP_APP_SECRET',
+    );
+    const esperada = `sha256=${createHmac('sha256', secreto).update(cuerpo).digest('hex')}`;
+    return iguales(firma, esperada);
   }
 
   private async enviar(mensaje: object): Promise<string> {
