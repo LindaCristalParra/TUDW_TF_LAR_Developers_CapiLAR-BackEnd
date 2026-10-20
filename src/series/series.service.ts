@@ -473,9 +473,12 @@ export class SeriesService {
         'Solo podés crear series de turnos de tu agenda',
       );
     }
-    if (turno.estado !== EstadoTurno.CONFIRMADO) {
+    if (
+      turno.estado !== EstadoTurno.CONFIRMADO &&
+      turno.estado !== EstadoTurno.COMPLETADO
+    ) {
       throw new BadRequestException(
-        'La serie se crea a partir de un turno confirmado',
+        'La serie se crea a partir de un turno confirmado o completado',
       );
     }
     // Two series with the same dates would book them twice.
