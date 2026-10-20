@@ -270,6 +270,22 @@ export class TurnosService {
     return turnos.map((t) => this.formatear(t, { paraCliente: true }));
   }
 
+  // All the turnos of a client with the salon, for the professionals (also after her baja).
+  async findDeCliente(clienteId: number) {
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { usuarioId: clienteId },
+    });
+    if (!cliente) {
+      throw new NotFoundException('Cliente no encontrado');
+    }
+    const turnos = await this.prisma.turno.findMany({
+      where: { clienteId },
+      orderBy: [{ fecha: 'desc' }, { horaInicio: 'desc' }],
+      include: turnoInclude,
+    });
+    return turnos.map((t) => this.formatear(t));
+  }
+
   // Read-only for the whole salon: one professional with legajo, everyone without it.
   async agenda(query: AgendaQueryDto) {
     if (!esFechaValida(query.desde) || !esFechaValida(query.hasta)) {
