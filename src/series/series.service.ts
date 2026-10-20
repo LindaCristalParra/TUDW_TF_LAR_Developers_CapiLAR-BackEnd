@@ -31,6 +31,7 @@ import {
   cargarContexto,
   horariosLibres,
   motivoNoDisponible,
+  tramosDeDetalles,
 } from '../turnos/agenda';
 import { PublicUser } from '../users/users.service';
 import { CreateSerieDto } from './dto/create-serie.dto';
@@ -502,12 +503,11 @@ export class SeriesService {
     }
 
     // Services are done one after another: this one starts after the previous ones.
-    let minuto = aMinutos(turno.horaInicio);
-    for (const d of turno.detalles) {
-      if (d.id === detalle.id) break;
-      minuto += d.servicio.tiempoDuracion;
-    }
-    const horaInicio = aHora(minuto);
+    const horaInicio = aHora(
+      tramosDeDetalles(turno.horaInicio, turno.detalles).find(
+        (t) => t.detalle.id === detalle.id,
+      )!.inicio,
+    );
 
     const fechas = this.fechasDeLaSerie(
       dateAFecha(turno.fecha),

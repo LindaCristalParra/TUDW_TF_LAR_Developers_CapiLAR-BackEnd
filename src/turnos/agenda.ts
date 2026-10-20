@@ -132,6 +132,25 @@ export async function resolverItems(
   });
 }
 
+/**
+ * Minute range of each service of a turno: they are done one after another, starting at the
+ * turno's time. `detalles` must come ordered by id.
+ */
+export function tramosDeDetalles<
+  D extends { servicio: { tiempoDuracion: number } },
+>(
+  horaInicio: string,
+  detalles: D[],
+): { detalle: D; inicio: number; fin: number }[] {
+  let inicio = aMinutos(horaInicio);
+  return detalles.map((detalle) => {
+    const fin = inicio + detalle.servicio.tiempoDuracion;
+    const tramo = { detalle, inicio, fin };
+    inicio = fin;
+    return tramo;
+  });
+}
+
 /** Busy ranges of the given professionals on a date, rebuilt from each turno's detalles. */
 export async function tramosOcupados(
   db: Db,
@@ -153,13 +172,13 @@ export async function tramosOcupados(
 
   const tramos: Tramo[] = [];
   for (const turno of turnos) {
-    let inicio = aMinutos(turno.horaInicio);
-    for (const detalle of turno.detalles) {
-      const fin = inicio + detalle.servicio.tiempoDuracion;
+    for (const { detalle, inicio, fin } of tramosDeDetalles(
+      turno.horaInicio,
+      turno.detalles,
+    )) {
       if (legajos.includes(detalle.profesionalId)) {
         tramos.push({ legajo: detalle.profesionalId, inicio, fin });
       }
-      inicio = fin;
     }
   }
   return tramos;
