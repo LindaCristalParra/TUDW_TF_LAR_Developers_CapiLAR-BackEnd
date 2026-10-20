@@ -193,6 +193,27 @@ export class UsersService {
     });
   }
 
+  // One client for the salon, also after a baja (fechaBaja tells it): her history stays.
+  async findCliente(id: number) {
+    const usuario = await this.prisma.usuario.findFirst({
+      where: { id, cliente: { isNot: null } },
+      select: {
+        ...clienteResumenSelect,
+        fechaNacimiento: true,
+        fechaAlta: true,
+        fechaBaja: true,
+      },
+    });
+    if (!usuario) {
+      throw new NotFoundException('Cliente no encontrado');
+    }
+    const { fechaNacimiento } = usuario;
+    return {
+      ...usuario,
+      fechaNacimiento: fechaNacimiento ? dateAFecha(fechaNacimiento) : null,
+    };
+  }
+
   // F02: role change. The current role (Usuario.rol) is the "estado del rol" F02 asks for.
   async changeRol(
     id: number,
