@@ -33,6 +33,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { fechasDeSerie } from '../series/fechas-serie';
 import { PublicUser } from '../users/users.service';
 import { VerificacionEmailService } from '../users/verificacion-email.service';
+import { WhatsAppService, aNumeroWhatsApp } from '../whatsapp/whatsapp.service';
 import {
   ESTADOS_CANCELABLES,
   ItemTurno,
@@ -114,6 +115,7 @@ export class TurnosService {
     private readonly prisma: PrismaService,
     private readonly mailService: MailService,
     private readonly verificacionEmail: VerificacionEmailService,
+    private readonly whatsAppService: WhatsAppService,
   ) {}
 
   // turnoId (rescheduling) and clienteId (booking for a client) are for professionals only.
@@ -579,9 +581,10 @@ export class TurnosService {
   // --- F06 reminder (the cron calls it every 15 minutes) ---
 
   /**
-   * Emails CONFIRMADO turnos that start within 24 h (but more than 12 h from now, so the
-   * client can still cancel) and have no reminder for their current time. Returns how many
-   * were sent. A failed email is saved as ERROR and retried on the next run.
+   * Reminds CONFIRMADO turnos that start within 24 h (but more than 12 h from now, so the
+   * client can still cancel) by email and by WhatsApp, each medium once for the turno's
+   * current time. Returns how many messages were sent. A failed one is saved as ERROR and
+   * retried on the next run.
    */
   async enviarRecordatorios(): Promise<number> {
     const hoy = fechaADate(ahoraEnSalon().fecha);
@@ -598,7 +601,6 @@ export class TurnosService {
         notificaciones: {
           where: {
             tipo: TipoNotificacion.RECORDATORIO,
-            medio: MedioNotificacion.EMAIL,
             estadoEnvio: EstadoEnvio.ENVIADO,
           },
         },
@@ -608,57 +610,133 @@ export class TurnosService {
     let enviados = 0;
     for (const turno of turnos) {
       const faltan = this.minutosHasta(turno, turno.horaInicio);
-      const inicio = this.inicioDe(turno);
       if (
         faltan <= HORAS_CANCELACION_CLIENTE * 60 ||
-        faltan > HORAS_RECORDATORIO * 60 ||
-        turno.notificaciones.some(
-          (n) => n.inicioTurno?.getTime() === inicio.getTime(),
-        )
+        faltan > HORAS_RECORDATORIO * 60
       ) {
         continue;
       }
+      const inicio = this.inicioDe(turno);
+      const yaEnviado = (medio: MedioNotificacion) =>
+        turno.notificaciones.some(
+          (n) =>
+            n.medio === medio && n.inicioTurno?.getTime() === inicio.getTime(),
+        );
 
-      const token = randomBytes(32).toString('hex');
-      const { usuario } = turno.cliente;
-      let estadoEnvio: EstadoEnvio = EstadoEnvio.ENVIADO;
-      try {
-        await this.mailService.sendTurno(
-          usuario.email,
-          'Recordatorio de tu turno',
-          {
-            ...this.contenidoBase(turno),
-            titulo: '¿Nos vemos en tu turno?',
-            nombre: usuario.nombre,
-            mensaje: `Te recordamos tu turno. Confirmanos si venís. Si no podés, cancelalo hasta ${HORAS_CANCELACION_CLIENTE} horas antes así otra persona puede usar el horario.`,
-            boton: 'CONFIRMO QUE VOY',
-            ruta: `/turno/confirmar?token=${token}`,
-            botonSecundario: 'NO PUEDO IR',
-            rutaSecundaria: `/turno/cancelar?token=${token}`,
-          },
-        );
+      if (
+        !yaEnviado(MedioNotificacion.EMAIL) &&
+        (await this.recordarPorMail(turno, inicio))
+      ) {
         enviados++;
-      } catch (error) {
-        estadoEnvio = EstadoEnvio.ERROR;
-        this.logger.error(
-          `Could not send reminder of turno ${turno.id} to ${usuario.email}`,
-          error instanceof Error ? error.stack : String(error),
-        );
       }
-      await this.prisma.notificacion.create({
-        data: {
-          turnoId: turno.id,
-          usuarioId: usuario.id,
-          medio: MedioNotificacion.EMAIL,
-          tipo: TipoNotificacion.RECORDATORIO,
-          estadoEnvio,
-          inicioTurno: inicio,
-          tokenHash:
-            estadoEnvio === EstadoEnvio.ENVIADO ? hashToken(token) : null,
-        },
-      });
+      if (
+        !yaEnviado(MedioNotificacion.WHATSAPP) &&
+        (await this.recordarPorWhatsApp(turno, inicio))
+      ) {
+        enviados++;
+      }
     }
     return enviados;
+  }
+
+  private async recordarPorMail(
+    turno: TurnoCompleto,
+    inicio: Date,
+  ): Promise<boolean> {
+    const token = randomBytes(32).toString('hex');
+    const { usuario } = turno.cliente;
+    try {
+      await this.mailService.sendTurno(
+        usuario.email,
+        'Recordatorio de tu turno',
+        {
+          ...this.contenidoBase(turno),
+          titulo: '¿Nos vemos en tu turno?',
+          nombre: usuario.nombre,
+          mensaje: `Te recordamos tu turno. Confirmanos si venís. Si no podés, cancelalo hasta ${HORAS_CANCELACION_CLIENTE} horas antes así otra persona puede usar el horario.`,
+          boton: 'CONFIRMO QUE VOY',
+          ruta: `/turno/confirmar?token=${token}`,
+          botonSecundario: 'NO PUEDO IR',
+          rutaSecundaria: `/turno/cancelar?token=${token}`,
+        },
+      );
+    } catch (error) {
+      this.logger.error(
+        `Could not email reminder of turno ${turno.id} to ${usuario.email}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      await this.guardarRecordatorio(turno, MedioNotificacion.EMAIL, inicio);
+      return false;
+    }
+    await this.guardarRecordatorio(
+      turno,
+      MedioNotificacion.EMAIL,
+      inicio,
+      token,
+    );
+    return true;
+  }
+
+  // Template recordatorio_turno: {{1}} name, {{2}} date, {{3}} time, {{4}} "Corte con Ana, ...".
+  // Each quick reply carries the token, so the webhook knows which turno and what to do.
+  private async recordarPorWhatsApp(
+    turno: TurnoCompleto,
+    inicio: Date,
+  ): Promise<boolean> {
+    const { usuario } = turno.cliente;
+    const numero = aNumeroWhatsApp(usuario.telefono);
+    // A phone that can't be a WhatsApp number: only the email goes out (nothing to retry).
+    if (!numero) return false;
+
+    const token = randomBytes(32).toString('hex');
+    const { fecha, servicios } = this.contenidoBase(turno);
+    try {
+      await this.whatsAppService.enviarPlantilla(
+        numero,
+        'recordatorio_turno',
+        [
+          usuario.nombre,
+          fecha,
+          turno.horaInicio,
+          servicios.map((s) => `${s.servicio} con ${s.profesional}`).join(', '),
+        ],
+        [`CONFIRMAR:${token}`, `CANCELAR:${token}`],
+      );
+    } catch (error) {
+      this.logger.error(
+        `Could not send WhatsApp reminder of turno ${turno.id} to ${numero}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+      await this.guardarRecordatorio(turno, MedioNotificacion.WHATSAPP, inicio);
+      return false;
+    }
+    await this.guardarRecordatorio(
+      turno,
+      MedioNotificacion.WHATSAPP,
+      inicio,
+      token,
+    );
+    return true;
+  }
+
+  // Without a token the attempt failed (ERROR); with one it was sent and its link works.
+  private async guardarRecordatorio(
+    turno: TurnoCompleto,
+    medio: MedioNotificacion,
+    inicio: Date,
+    token?: string,
+  ): Promise<void> {
+    await this.prisma.notificacion.create({
+      data: {
+        turnoId: turno.id,
+        usuarioId: turno.cliente.usuario.id,
+        medio,
+        tipo: TipoNotificacion.RECORDATORIO,
+        estadoEnvio: token ? EstadoEnvio.ENVIADO : EstadoEnvio.ERROR,
+        inicioTurno: inicio,
+        tokenHash: token ? hashToken(token) : null,
+      },
+    });
   }
 
   // Public routes with the reminder's link token (no login).
