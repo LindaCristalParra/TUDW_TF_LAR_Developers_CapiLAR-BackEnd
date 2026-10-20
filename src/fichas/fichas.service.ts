@@ -6,7 +6,7 @@ import {
   NotFoundException,
   StreamableFile,
 } from '@nestjs/common';
-import { dateAFecha } from '../common/fecha-hora';
+import { ahoraEnSalon, dateAFecha } from '../common/fecha-hora';
 import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
 import {
   EstadoTurno,
@@ -15,6 +15,7 @@ import {
   Rol,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { tramosDeDetalles } from '../turnos/agenda';
 import { PublicUser } from '../users/users.service';
 import { CreateFichaDto } from './dto/create-ficha.dto';
 import { FichaDto } from './dto/ficha.dto';
@@ -55,12 +56,28 @@ export class FichasService {
     private readonly fotosService: FotosService,
   ) {}
 
-  // Only the professional of that service, while the turno is CONFIRMADO.
+  // Only the professional of that service, while the turno is CONFIRMADO and once the service started.
   async create(turnoId: number, dto: CreateFichaDto, actor: PublicUser) {
     const { turnoDetalleId, formulas, ...campos } = dto;
     const detalle = await this.prisma.turnoDetalle.findUnique({
       where: { id: turnoDetalleId },
-      include: { turno: { select: { estado: true } } },
+      include: {
+        turno: {
+          select: {
+            estado: true,
+            fecha: true,
+            horaInicio: true,
+            // All the services, to know when this one starts.
+            detalles: {
+              orderBy: { id: 'asc' },
+              select: {
+                id: true,
+                servicio: { select: { tiempoDuracion: true } },
+              },
+            },
+          },
+        },
+      },
     });
     if (!detalle || detalle.turnoId !== turnoId) {
       throw new NotFoundException('Ese servicio no es de este turno');
@@ -69,6 +86,20 @@ export class FichasService {
     if (detalle.turno.estado !== EstadoTurno.CONFIRMADO) {
       throw new BadRequestException(
         'Solo se cargan fichas de turnos confirmados',
+      );
+    }
+    const { turno } = detalle;
+    const inicio = tramosDeDetalles(turno.horaInicio, turno.detalles).find(
+      (t) => t.detalle.id === turnoDetalleId,
+    )!.inicio;
+    const fecha = dateAFecha(turno.fecha);
+    const ahora = ahoraEnSalon();
+    if (
+      fecha > ahora.fecha ||
+      (fecha === ahora.fecha && inicio > ahora.minutos)
+    ) {
+      throw new BadRequestException(
+        'La ficha se carga desde que empieza el servicio',
       );
     }
     const existente = await this.prisma.fichaTecnica.findFirst({

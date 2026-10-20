@@ -39,6 +39,7 @@ import {
   assertDisponible,
   cargarContexto,
   horariosLibres,
+  tramosDeDetalles,
 } from './agenda';
 import { AgendaQueryDto } from './dto/agenda-query.dto';
 import { CancelarTurnoDto } from './dto/cancelar-turno.dto';
@@ -1017,23 +1018,20 @@ export class TurnosService {
     turno: TurnoCompleto,
     opciones: { paraCliente?: boolean } = {},
   ) {
-    let minuto = aMinutos(turno.horaInicio);
-    const detalles = turno.detalles.map((d) => {
-      const inicio = minuto;
-      minuto += d.servicio.tiempoDuracion;
-      return {
+    const detalles = tramosDeDetalles(turno.horaInicio, turno.detalles).map(
+      ({ detalle: d, inicio, fin }) => ({
         id: d.id,
         servicioId: d.servicioId,
         servicio: d.servicio.tipo,
         legajo: d.profesionalId,
         profesional: `${d.profesional.usuario.nombre} ${d.profesional.usuario.apellido}`,
         horaInicio: aHora(inicio),
-        horaFin: aHora(minuto),
+        horaFin: aHora(fin),
         precioBase: d.precioBase,
         // Salon only: the client sees her records in GET /fichas/mias.
         ...(opciones.paraCliente ? {} : { fichaId: d.fichas[0]?.id ?? null }),
-      };
-    });
+      }),
+    );
     const { usuario, alergia } = turno.cliente;
     return {
       id: turno.id,
