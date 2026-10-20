@@ -230,7 +230,7 @@ export class TurnosService {
           nombre: profesional.nombre,
           mensaje: `${turno.cliente.usuario.nombre} ${turno.cliente.usuario.apellido} pidió un turno. Entrá a tu agenda para aceptarlo o proponerle otro horario.`,
           boton: 'VER MI AGENDA',
-          ruta: '/agenda',
+          ruta: '/panel/agenda',
         });
       }
     } else {
@@ -244,7 +244,7 @@ export class TurnosService {
             nombre: profesional.nombre,
             mensaje: `${turno.cliente.usuario.nombre} ${turno.cliente.usuario.apellido} reservó un turno y ya quedó confirmado en tu agenda.`,
             boton: 'VER MI AGENDA',
-            ruta: '/agenda',
+            ruta: '/panel/agenda',
           });
         }
       }
@@ -474,7 +474,7 @@ export class TurnosService {
         nombre: profesional.nombre,
         mensaje: `El salón canceló este turno. Motivo: "${motivo}". El horario ya quedó libre en tu agenda.`,
         boton: 'VER MI AGENDA',
-        ruta: '/agenda',
+        ruta: '/panel/agenda',
       });
     }
     return this.formatear(actualizado);
@@ -514,7 +514,7 @@ export class TurnosService {
         nombre: profesional.nombre,
         mensaje: `${nombre} ${apellido} canceló su turno.${motivo ? ` Motivo: "${motivo}".` : ''} El horario ya quedó libre en tu agenda.`,
         boton: 'VER MI AGENDA',
-        ruta: '/agenda',
+        ruta: '/panel/agenda',
       });
     }
     return this.formatear(actualizado, { paraCliente: true });

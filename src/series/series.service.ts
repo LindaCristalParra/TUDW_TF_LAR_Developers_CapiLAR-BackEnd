@@ -688,7 +688,7 @@ export class SeriesService {
           detalle: `${plan.horaInicio} · Sin horario cargado`,
         })),
         boton: 'IR A MI AGENDA',
-        ruta: '/agenda',
+        ruta: '/panel/agenda',
       });
     }
   }
