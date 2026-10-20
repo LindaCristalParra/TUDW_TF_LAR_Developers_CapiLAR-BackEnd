@@ -65,6 +65,20 @@ export class UsersController {
   }
 
   /**
+   * Ver una clienta (PROFESIONAL)
+   *
+   * @remarks Los campos de `GET /users/clientes` más `fechaNacimiento`
+   * ("YYYY-MM-DD" o null), `fechaAlta` y `fechaBaja`. También responde si está
+   * dada de baja (`fechaBaja` con fecha). 404 si ese usuario no es cliente.
+   * Sus turnos: `GET /clientes/:id/turnos`.
+   */
+  @Get('clientes/:id')
+  @Roles(Rol.PROFESIONAL)
+  findCliente(@Param('id', ParseIdPipe) id: number) {
+    return this.usersService.findCliente(id);
+  }
+
+  /**
    * Editar mi perfil
    *
    * @remarks Se actualizan solo los campos enviados. 409 si el email ya lo usa otra
