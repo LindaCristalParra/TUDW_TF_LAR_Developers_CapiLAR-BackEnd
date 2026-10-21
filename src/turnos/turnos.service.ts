@@ -219,6 +219,7 @@ export class TurnosService {
 
     if (turno.estado === EstadoTurno.PENDIENTE) {
       this.avisarCliente(turno, 'Recibimos tu solicitud de turno', {
+        estilo: 'PENDIENTE',
         titulo: 'Recibimos tu solicitud',
         mensaje:
           'Tu pedido de turno ya está en manos del salón. Te avisamos por mail apenas lo confirmen.',
@@ -227,6 +228,7 @@ export class TurnosService {
       for (const profesional of this.profesionalesDe(turno)) {
         this.enviar(profesional.email, 'Nueva solicitud de turno', {
           ...this.contenidoBase(turno),
+          estilo: 'PENDIENTE',
           titulo: 'Tenés una nueva solicitud',
           nombre: profesional.nombre,
           mensaje: `${turno.cliente.usuario.nombre} ${turno.cliente.usuario.apellido} pidió un turno. Entrá a tu agenda para aceptarlo o proponerle otro horario.`,
@@ -241,6 +243,7 @@ export class TurnosService {
         for (const profesional of this.profesionalesDe(turno)) {
           this.enviar(profesional.email, 'Tenés un turno nuevo', {
             ...this.contenidoBase(turno),
+            estilo: 'CONFIRMADO',
             titulo: 'Tenés un turno nuevo',
             nombre: profesional.nombre,
             mensaje: `${turno.cliente.usuario.nombre} ${turno.cliente.usuario.apellido} reservó un turno y ya quedó confirmado en tu agenda.`,
@@ -370,6 +373,7 @@ export class TurnosService {
 
     // Friendly notice without the internal reason.
     this.avisarCliente(actualizado, 'Sobre tu solicitud de turno', {
+      estilo: 'OTRO_HORARIO',
       titulo: 'Busquemos otro horario',
       mensaje: alternativas.length
         ? 'No pudimos confirmar tu turno en ese horario, pero queremos atenderte. Elegí el que mejor te quede de estos y pedilo desde la app.'
@@ -435,6 +439,7 @@ export class TurnosService {
     });
 
     this.avisarCliente(actualizado, 'Te proponemos un nuevo horario', {
+      estilo: 'REPROGRAMADO',
       titulo: 'Te proponemos un nuevo horario',
       mensaje:
         'El salón necesitó mover tu turno. Este es el horario nuevo: entrá a la app para aceptarlo. Si no te queda cómodo, podés cancelarlo y pedir otro.',
@@ -478,6 +483,7 @@ export class TurnosService {
       include: turnoInclude,
     });
     this.avisarCliente(actualizado, 'Tu turno fue cancelado', {
+      estilo: 'CANCELADO',
       titulo: 'Tu turno fue cancelado',
       mensaje: `Lamentamos avisarte que el salón tuvo que cancelar tu turno. Motivo: "${motivo}". Entrá a la app y elegí otro horario que te quede cómodo.`,
       boton: 'PEDIR OTRO TURNO',
@@ -487,6 +493,7 @@ export class TurnosService {
       if (profesional.email === actor.email) continue;
       this.enviar(profesional.email, 'Se canceló un turno', {
         ...this.contenidoBase(actualizado),
+        estilo: 'CANCELADO',
         titulo: 'Se canceló un turno',
         nombre: profesional.nombre,
         mensaje: `El salón canceló este turno. Motivo: "${motivo}". El horario ya quedó libre en tu agenda.`,
@@ -527,6 +534,7 @@ export class TurnosService {
     for (const profesional of this.profesionalesDe(actualizado)) {
       this.enviar(profesional.email, 'Se canceló un turno', {
         ...this.contenidoBase(actualizado),
+        estilo: 'CANCELADO',
         titulo: 'Se canceló un turno',
         nombre: profesional.nombre,
         mensaje: `${nombre} ${apellido} canceló su turno.${motivo ? ` Motivo: "${motivo}".` : ''} El horario ya quedó libre en tu agenda.`,
@@ -650,6 +658,7 @@ export class TurnosService {
           'Recordatorio de tu turno',
           {
             ...this.contenidoBase(turno),
+            estilo: 'RECORDATORIO',
             titulo: '¿Nos vemos en tu turno?',
             nombre: usuario.nombre,
             mensaje: `Te recordamos tu turno. Confirmanos si venís. Si no podés, cancelalo hasta ${HORAS_CANCELACION_CLIENTE} horas antes así otra persona puede usar el horario.`,
@@ -1096,6 +1105,7 @@ export class TurnosService {
 
   private avisarConfirmado(turno: TurnoCompleto): void {
     this.avisarCliente(turno, 'Tu turno está confirmado', {
+      estilo: 'CONFIRMADO',
       titulo: '¡Tu turno está confirmado!',
       mensaje:
         'Te esperamos en el salón. Si necesitás cambiarlo, podés hacerlo desde la app.',
@@ -1106,7 +1116,7 @@ export class TurnosService {
   private avisarCliente(
     turno: TurnoCompleto,
     asunto: string,
-    texto: Pick<MailTurno, 'titulo' | 'mensaje' | 'boton'> &
+    texto: Pick<MailTurno, 'estilo' | 'titulo' | 'mensaje' | 'boton'> &
       Partial<Pick<MailTurno, 'alternativas'>>,
   ): void {
     const { usuario } = turno.cliente;

@@ -5,6 +5,20 @@ import { HandlebarsAdapter } from '@nestjs-modules/mailer/adapters/handlebars.ad
 import { join } from 'path';
 import { MailService } from './mail.service';
 
+const MINUSCULAS = ['de', 'a', 'las'];
+
+/** Templates' {{fechaTitulo x}}: "viernes, 23 de octubre a las 10:00" -> "Viernes 23 de Octubre a las 10:00". */
+function fechaTitulo(texto: string): string {
+  // Intl puts a comma after the weekday.
+  return texto
+    .replace(',', '')
+    .replace(/\p{L}+/gu, (palabra) =>
+      MINUSCULAS.includes(palabra)
+        ? palabra
+        : palabra[0].toUpperCase() + palabra.slice(1),
+    );
+}
+
 @Module({
   imports: [
     MailerModule.forRootAsync({
@@ -24,7 +38,7 @@ import { MailService } from './mail.service';
         },
         template: {
           dir: join(__dirname, 'templates'),
-          adapter: new HandlebarsAdapter(),
+          adapter: new HandlebarsAdapter({ fechaTitulo }),
           options: { strict: true },
         },
       }),
