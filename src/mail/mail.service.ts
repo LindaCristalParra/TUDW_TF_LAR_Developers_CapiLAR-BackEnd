@@ -77,12 +77,13 @@ export interface MailAgendaDiaria {
 
 /** Context of templates/serie.hbs (F05): the dates of a series, one line each. */
 export interface MailSerie {
+  estilo: EstiloMail;
   titulo: string;
   nombre: string;
   mensaje: string;
   // e.g. "Corte con Flor Fichera, cada semana a las 10:00"
   resumen: string;
-  // fecha e.g. "martes 8 de octubre"; detalle e.g. "10:00 · Confirmado"
+  // fecha e.g. "martes 8 de octubre"; detalle e.g. "10:00 h · Confirmado"
   fechas: { fecha: string; detalle: string }[];
   boton: string;
   // Front-end path the button opens, e.g. "/mis-turnos"
@@ -143,12 +144,17 @@ export class MailService {
     contenido: MailSerie,
   ): Promise<void> {
     const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    const { emoji, ...estilo } = ESTILOS_MAIL[contenido.estilo];
 
     await this.mailerService.sendMail({
       to: email,
-      subject: asunto,
+      subject: `${emoji} ${asunto}`,
       template: 'serie',
-      context: { ...contenido, link: `${frontendUrl}${contenido.ruta}` },
+      context: {
+        ...contenido,
+        ...estilo,
+        link: `${frontendUrl}${contenido.ruta}`,
+      },
     });
   }
 
