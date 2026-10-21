@@ -182,8 +182,9 @@ export class TurnosController {
    *
    * @remarks Público (sin login): el token viene en el enlace del mail
    * (`/turno/confirmar?token=` o `/turno/cancelar?token=`). Devuelve el turno y
-   * `puedeCancelar` (faltan 12 horas o más). 400 si el enlace no es válido, el
-   * turno cambió de horario, ya no está confirmado o ya empezó.
+   * `puedeCancelar` (siempre `true`: desde el recordatorio se puede cancelar
+   * hasta que empiece). 400 si el enlace no es válido, el turno cambió de
+   * horario, ya no está confirmado o ya empezó.
    */
   @Get('accion')
   @Public()
@@ -207,8 +208,10 @@ export class TurnosController {
   /**
    * Cancelar desde el enlace del recordatorio
    *
-   * @remarks Público, con el token del mail. Mismas reglas que cancelar desde la
-   * app: hasta 12 horas antes; el motivo es opcional y se avisa a los profesionales.
+   * @remarks Público, con el token del mail. A diferencia de la app, no tiene el
+   * límite de 12 horas: se puede cancelar hasta que empiece, así el horario se
+   * libera. El motivo es opcional y se avisa por mail a los profesionales (si
+   * faltaban menos de 12 horas, el mail lo marca).
    */
   @Post('accion/cancelar')
   @Public()

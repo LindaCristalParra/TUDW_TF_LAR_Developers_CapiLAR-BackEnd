@@ -477,10 +477,12 @@ export class TurnosService {
     return this.formatear(actualizado);
   }
 
-  // Same rules from the app and from the reminder's link. The professionals get an email.
+  // The professionals get an email. From the reminder (email link or WhatsApp button) there's
+  // no 12 h limit, so the slot is freed anyway; a late one is flagged in the email.
   private async cancelarComoCliente(
     turno: TurnoCompleto,
     motivo: string | null,
+    desdeRecordatorio = false,
   ) {
     this.assertCancelable(turno);
     const faltan = this.minutosHasta(turno, turno.horaInicio);
@@ -489,10 +491,10 @@ export class TurnosService {
         'El turno ya empezó: comunicate con el salón',
       );
     }
-    if (
+    const tardia =
       turno.estado === EstadoTurno.CONFIRMADO &&
-      faltan < HORAS_CANCELACION_CLIENTE * 60
-    ) {
+      faltan < HORAS_CANCELACION_CLIENTE * 60;
+    if (tardia && !desdeRecordatorio) {
       throw new BadRequestException(
         `Los turnos confirmados se cancelan hasta ${HORAS_CANCELACION_CLIENTE} horas antes. Para cancelarlo ahora, comunicate con el salón.`,
       );
@@ -504,12 +506,15 @@ export class TurnosService {
       include: turnoInclude,
     });
     const { nombre, apellido } = actualizado.cliente.usuario;
+    const titulo = tardia
+      ? `Se canceló un turno con menos de ${HORAS_CANCELACION_CLIENTE} h de aviso`
+      : 'Se canceló un turno';
     for (const profesional of this.profesionalesDe(actualizado)) {
-      this.enviar(profesional.email, 'Se canceló un turno', {
+      this.enviar(profesional.email, titulo, {
         ...this.contenidoBase(actualizado),
-        titulo: 'Se canceló un turno',
+        titulo,
         nombre: profesional.nombre,
-        mensaje: `${nombre} ${apellido} canceló su turno.${motivo ? ` Motivo: "${motivo}".` : ''} El horario ya quedó libre en tu agenda.`,
+        mensaje: `${nombre} ${apellido} canceló su turno${tardia ? ` desde el recordatorio, con menos de ${HORAS_CANCELACION_CLIENTE} horas de aviso` : ''}.${motivo ? ` Motivo: "${motivo}".` : ''} El horario ya quedó libre en tu agenda.`,
         boton: 'VER MI AGENDA',
         ruta: '/agenda',
       });
@@ -653,7 +658,8 @@ export class TurnosService {
           ...this.contenidoBase(turno),
           titulo: '¿Nos vemos en tu turno?',
           nombre: usuario.nombre,
-          mensaje: `Te recordamos tu turno. Confirmanos si venís. Si no podés, cancelalo hasta ${HORAS_CANCELACION_CLIENTE} horas antes así otra persona puede usar el horario.`,
+          mensaje:
+            'Te recordamos tu turno. Confirmanos si venís. Si no podés, avisanos con "No puedo ir" así otra persona puede usar el horario.',
           boton: 'CONFIRMO QUE VOY',
           ruta: `/turno/confirmar?token=${token}`,
           botonSecundario: 'NO PUEDO IR',
@@ -741,13 +747,12 @@ export class TurnosService {
 
   // Public routes with the reminder's link token (no login).
 
+  // A valid link can always cancel (no 12 h limit from the reminder); the field stays for the front.
   async verPorToken(token: string) {
     const turno = await this.turnoDelToken(token);
     return {
       ...this.formatear(turno, { paraCliente: true }),
-      puedeCancelar:
-        this.minutosHasta(turno, turno.horaInicio) >=
-        HORAS_CANCELACION_CLIENTE * 60,
+      puedeCancelar: true,
     };
   }
 
@@ -756,7 +761,11 @@ export class TurnosService {
   }
 
   async cancelarPorToken(token: string, motivo: string | null) {
-    return this.cancelarComoCliente(await this.turnoDelToken(token), motivo);
+    return this.cancelarComoCliente(
+      await this.turnoDelToken(token),
+      motivo,
+      true,
+    );
   }
 
   /**
