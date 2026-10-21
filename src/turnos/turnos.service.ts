@@ -461,6 +461,19 @@ export class TurnosService {
       include: turnoInclude,
     });
     this.avisarConfirmado(actualizado);
+    // The new time is final now: the professionals of the turno learn it by mail.
+    const { nombre, apellido } = actualizado.cliente.usuario;
+    for (const profesional of this.profesionalesDe(actualizado)) {
+      this.enviar(profesional.email, 'Se reprogramó un turno', {
+        ...this.contenidoBase(actualizado),
+        estilo: 'REPROGRAMADO',
+        titulo: 'Se reprogramó un turno',
+        nombre: profesional.nombre,
+        mensaje: `${nombre} ${apellido} aceptó el nuevo horario de su turno. Ya quedó confirmado en tu agenda.`,
+        boton: 'VER MI AGENDA',
+        ruta: '/panel/agenda',
+      });
+    }
     return this.formatear(actualizado, { paraCliente: true });
   }
 
