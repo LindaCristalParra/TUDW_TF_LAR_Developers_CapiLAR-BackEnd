@@ -31,6 +31,7 @@ import {
   cargarContexto,
   horariosLibres,
   motivoNoDisponible,
+  tramosDeDetalles,
 } from '../turnos/agenda';
 import { PublicUser } from '../users/users.service';
 import { CreateSerieDto } from './dto/create-serie.dto';
@@ -291,13 +292,14 @@ export class SeriesService {
     const accion =
       estado === EstadoSerie.SUSPENDIDA ? 'suspendió' : 'dio de baja';
     this.enviar(usuario.email, 'Se cancelaron turnos de tu serie', {
+      estilo: 'CANCELADO',
       titulo: 'Se cancelaron turnos de tu serie',
       nombre: usuario.nombre,
       mensaje: `${profesional} ${accion} tu serie de turnos${motivo ? `. Motivo: "${motivo}"` : ''}. Estos turnos quedaron cancelados; si querés, podés pedir otros desde la app.`,
       resumen: this.resumen(serie.servicio.tipo, profesional, serie),
       fechas: futuros.map((t) => ({
         fecha: this.fechaLarga(dateAFecha(t.fecha)),
-        detalle: `${t.horaInicio} · Cancelado`,
+        detalle: `${t.horaInicio} h · Cancelado`,
       })),
       boton: 'PEDIR OTRO TURNO',
       ruta: '/mis-turnos',
@@ -473,9 +475,12 @@ export class SeriesService {
         'Solo podés crear series de turnos de tu agenda',
       );
     }
-    if (turno.estado !== EstadoTurno.CONFIRMADO) {
+    if (
+      turno.estado !== EstadoTurno.CONFIRMADO &&
+      turno.estado !== EstadoTurno.COMPLETADO
+    ) {
       throw new BadRequestException(
-        'La serie se crea a partir de un turno confirmado',
+        'La serie se crea a partir de un turno confirmado o completado',
       );
     }
     // Two series with the same dates would book them twice.
@@ -502,12 +507,11 @@ export class SeriesService {
     }
 
     // Services are done one after another: this one starts after the previous ones.
-    let minuto = aMinutos(turno.horaInicio);
-    for (const d of turno.detalles) {
-      if (d.id === detalle.id) break;
-      minuto += d.servicio.tiempoDuracion;
-    }
-    const horaInicio = aHora(minuto);
+    const horaInicio = aHora(
+      tramosDeDetalles(turno.horaInicio, turno.detalles).find(
+        (t) => t.detalle.id === detalle.id,
+      )!.inicio,
+    );
 
     const fechas = this.fechasDeLaSerie(
       dateAFecha(turno.fecha),
@@ -659,6 +663,7 @@ export class SeriesService {
     const ocupadas = plan.fechas.some((f) => f.estado === 'OCUPADA');
 
     this.enviar(plan.cliente.email, 'Tus próximos turnos', {
+      estilo: 'CONFIRMADO',
       titulo: 'Tus próximos turnos',
       nombre: plan.cliente.nombre,
       mensaje: ocupadas
@@ -676,16 +681,17 @@ export class SeriesService {
     const sinHorario = plan.fechas.filter((f) => f.estado === 'SIN_HORARIO');
     if (sinHorario.length) {
       this.enviar(plan.profesional.email, 'Completá tu agenda', {
+        estilo: 'PENDIENTE',
         titulo: 'Completá tu agenda',
         nombre: plan.profesional.nombre,
         mensaje: `Los turnos de ${plan.cliente.nombre} ${plan.cliente.apellido} ya quedaron reservados, pero estos días todavía no tienen tu horario cargado. Cargalo desde tu agenda.`,
         resumen,
         fechas: sinHorario.map((f) => ({
           fecha: this.fechaLarga(f.fecha),
-          detalle: `${plan.horaInicio} · Sin horario cargado`,
+          detalle: `${plan.horaInicio} h · Sin horario cargado`,
         })),
         boton: 'IR A MI AGENDA',
-        ruta: '/agenda',
+        ruta: '/panel/agenda',
       });
     }
   }
@@ -701,7 +707,7 @@ export class SeriesService {
 
   private detalleParaCliente(f: FechaPlanificada, hora: string): string {
     if (f.estado !== 'OCUPADA') {
-      return `${hora} · Confirmado`;
+      return `${hora} h · Confirmado`;
     }
     if (!f.horariosLibres.length) {
       return `Sin lugar a las ${hora}. Por ahora no hay otros horarios ese día`;

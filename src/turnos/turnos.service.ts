@@ -40,6 +40,7 @@ import {
   assertDisponible,
   cargarContexto,
   horariosLibres,
+  tramosDeDetalles,
 } from './agenda';
 import { AgendaQueryDto } from './dto/agenda-query.dto';
 import { CancelarTurnoDto } from './dto/cancelar-turno.dto';
@@ -97,6 +98,11 @@ const turnoInclude = {
         },
       },
     },
+  },
+  // The series this turno started (at most one that isn't BAJA, see SeriesService).
+  seriesOrigen: {
+    where: { estado: { not: EstadoSerie.BAJA } },
+    select: { id: true },
   },
 } satisfies Prisma.TurnoInclude;
 
@@ -215,6 +221,7 @@ export class TurnosService {
 
     if (turno.estado === EstadoTurno.PENDIENTE) {
       this.avisarCliente(turno, 'Recibimos tu solicitud de turno', {
+        estilo: 'PENDIENTE',
         titulo: 'Recibimos tu solicitud',
         mensaje:
           'Tu pedido de turno ya está en manos del salón. Te avisamos por mail apenas lo confirmen.',
@@ -223,11 +230,12 @@ export class TurnosService {
       for (const profesional of this.profesionalesDe(turno)) {
         this.enviar(profesional.email, 'Nueva solicitud de turno', {
           ...this.contenidoBase(turno),
+          estilo: 'PENDIENTE',
           titulo: 'Tenés una nueva solicitud',
           nombre: profesional.nombre,
           mensaje: `${turno.cliente.usuario.nombre} ${turno.cliente.usuario.apellido} pidió un turno. Entrá a tu agenda para aceptarlo o proponerle otro horario.`,
           boton: 'VER MI AGENDA',
-          ruta: '/agenda',
+          ruta: '/panel/agenda',
         });
       }
     } else {
@@ -237,11 +245,12 @@ export class TurnosService {
         for (const profesional of this.profesionalesDe(turno)) {
           this.enviar(profesional.email, 'Tenés un turno nuevo', {
             ...this.contenidoBase(turno),
+            estilo: 'CONFIRMADO',
             titulo: 'Tenés un turno nuevo',
             nombre: profesional.nombre,
             mensaje: `${turno.cliente.usuario.nombre} ${turno.cliente.usuario.apellido} reservó un turno y ya quedó confirmado en tu agenda.`,
             boton: 'VER MI AGENDA',
-            ruta: '/agenda',
+            ruta: '/panel/agenda',
           });
         }
       }
@@ -264,6 +273,22 @@ export class TurnosService {
       include: turnoInclude,
     });
     return turnos.map((t) => this.formatear(t, { paraCliente: true }));
+  }
+
+  // All the turnos of a client with the salon, for the professionals (also after her baja).
+  async findDeCliente(clienteId: number) {
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { usuarioId: clienteId },
+    });
+    if (!cliente) {
+      throw new NotFoundException('Cliente no encontrado');
+    }
+    const turnos = await this.prisma.turno.findMany({
+      where: { clienteId },
+      orderBy: [{ fecha: 'desc' }, { horaInicio: 'desc' }],
+      include: turnoInclude,
+    });
+    return turnos.map((t) => this.formatear(t));
   }
 
   // Read-only for the whole salon: one professional with legajo, everyone without it.
@@ -350,6 +375,7 @@ export class TurnosService {
 
     // Friendly notice without the internal reason.
     this.avisarCliente(actualizado, 'Sobre tu solicitud de turno', {
+      estilo: 'OTRO_HORARIO',
       titulo: 'Busquemos otro horario',
       mensaje: alternativas.length
         ? 'No pudimos confirmar tu turno en ese horario, pero queremos atenderte. Elegí el que mejor te quede de estos y pedilo desde la app.'
@@ -415,6 +441,7 @@ export class TurnosService {
     });
 
     this.avisarCliente(actualizado, 'Te proponemos un nuevo horario', {
+      estilo: 'REPROGRAMADO',
       titulo: 'Te proponemos un nuevo horario',
       mensaje:
         'El salón necesitó mover tu turno. Este es el horario nuevo: entrá a la app para aceptarlo. Si no te queda cómodo, podés cancelarlo y pedir otro.',
@@ -436,6 +463,19 @@ export class TurnosService {
       include: turnoInclude,
     });
     this.avisarConfirmado(actualizado);
+    // The new time is final now: the professionals of the turno learn it by mail.
+    const { nombre, apellido } = actualizado.cliente.usuario;
+    for (const profesional of this.profesionalesDe(actualizado)) {
+      this.enviar(profesional.email, 'Se reprogramó un turno', {
+        ...this.contenidoBase(actualizado),
+        estilo: 'REPROGRAMADO',
+        titulo: 'Se reprogramó un turno',
+        nombre: profesional.nombre,
+        mensaje: `${nombre} ${apellido} aceptó el nuevo horario de su turno. Ya quedó confirmado en tu agenda.`,
+        boton: 'VER MI AGENDA',
+        ruta: '/panel/agenda',
+      });
+    }
     return this.formatear(actualizado, { paraCliente: true });
   }
 
@@ -458,6 +498,7 @@ export class TurnosService {
       include: turnoInclude,
     });
     this.avisarCliente(actualizado, 'Tu turno fue cancelado', {
+      estilo: 'CANCELADO',
       titulo: 'Tu turno fue cancelado',
       mensaje: `Lamentamos avisarte que el salón tuvo que cancelar tu turno. Motivo: "${motivo}". Entrá a la app y elegí otro horario que te quede cómodo.`,
       boton: 'PEDIR OTRO TURNO',
@@ -467,11 +508,12 @@ export class TurnosService {
       if (profesional.email === actor.email) continue;
       this.enviar(profesional.email, 'Se canceló un turno', {
         ...this.contenidoBase(actualizado),
+        estilo: 'CANCELADO',
         titulo: 'Se canceló un turno',
         nombre: profesional.nombre,
         mensaje: `El salón canceló este turno. Motivo: "${motivo}". El horario ya quedó libre en tu agenda.`,
         boton: 'VER MI AGENDA',
-        ruta: '/agenda',
+        ruta: '/panel/agenda',
       });
     }
     return this.formatear(actualizado);
@@ -512,11 +554,12 @@ export class TurnosService {
     for (const profesional of this.profesionalesDe(actualizado)) {
       this.enviar(profesional.email, titulo, {
         ...this.contenidoBase(actualizado),
+        estilo: tardia ? 'CANCELADO_TARDE' : 'CANCELADO',
         titulo,
         nombre: profesional.nombre,
         mensaje: `${nombre} ${apellido} canceló su turno${tardia ? ` desde el recordatorio, con menos de ${HORAS_CANCELACION_CLIENTE} horas de aviso` : ''}.${motivo ? ` Motivo: "${motivo}".` : ''} El horario ya quedó libre en tu agenda.`,
         boton: 'VER MI AGENDA',
-        ruta: '/agenda',
+        ruta: '/panel/agenda',
       });
     }
     return this.formatear(actualizado, { paraCliente: true });
@@ -656,6 +699,7 @@ export class TurnosService {
         'Recordatorio de tu turno',
         {
           ...this.contenidoBase(turno),
+          estilo: 'RECORDATORIO',
           titulo: '¿Nos vemos en tu turno?',
           nombre: usuario.nombre,
           mensaje:
@@ -1123,23 +1167,20 @@ export class TurnosService {
     turno: TurnoCompleto,
     opciones: { paraCliente?: boolean } = {},
   ) {
-    let minuto = aMinutos(turno.horaInicio);
-    const detalles = turno.detalles.map((d) => {
-      const inicio = minuto;
-      minuto += d.servicio.tiempoDuracion;
-      return {
+    const detalles = tramosDeDetalles(turno.horaInicio, turno.detalles).map(
+      ({ detalle: d, inicio, fin }) => ({
         id: d.id,
         servicioId: d.servicioId,
         servicio: d.servicio.tipo,
         legajo: d.profesionalId,
         profesional: `${d.profesional.usuario.nombre} ${d.profesional.usuario.apellido}`,
         horaInicio: aHora(inicio),
-        horaFin: aHora(minuto),
+        horaFin: aHora(fin),
         precioBase: d.precioBase,
         // Salon only: the client sees her records in GET /fichas/mias.
         ...(opciones.paraCliente ? {} : { fichaId: d.fichas[0]?.id ?? null }),
-      };
-    });
+      }),
+    );
     const { usuario, alergia } = turno.cliente;
     return {
       id: turno.id,
@@ -1147,6 +1188,9 @@ export class TurnosService {
       horaInicio: turno.horaInicio,
       horaFin: turno.horaFin,
       estado: turno.estado,
+      // serieId: the series it belongs to. serieOrigenId: the series it started.
+      serieId: turno.serieId,
+      serieOrigenId: turno.seriesOrigen[0]?.id ?? null,
       asistenciaConfirmadaEn: turno.asistenciaConfirmadaEn,
       metodoPago: turno.metodoPago,
       // A rejection reason is internal: never sent to the client. A cancellation reason is.
@@ -1185,6 +1229,7 @@ export class TurnosService {
 
   private avisarConfirmado(turno: TurnoCompleto): void {
     this.avisarCliente(turno, 'Tu turno está confirmado', {
+      estilo: 'CONFIRMADO',
       titulo: '¡Tu turno está confirmado!',
       mensaje:
         'Te esperamos en el salón. Si necesitás cambiarlo, podés hacerlo desde la app.',
@@ -1195,7 +1240,7 @@ export class TurnosService {
   private avisarCliente(
     turno: TurnoCompleto,
     asunto: string,
-    texto: Pick<MailTurno, 'titulo' | 'mensaje' | 'boton'> &
+    texto: Pick<MailTurno, 'estilo' | 'titulo' | 'mensaje' | 'boton'> &
       Partial<Pick<MailTurno, 'alternativas'>>,
   ): void {
     const { usuario } = turno.cliente;

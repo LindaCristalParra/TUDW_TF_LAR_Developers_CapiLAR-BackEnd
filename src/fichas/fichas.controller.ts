@@ -42,8 +42,9 @@ export class FichasController {
    * Cargar la ficha técnica de un servicio del turno
    *
    * @remarks Solo el profesional de ese servicio (`turnoDetalleId`, de
-   * `detalles[]` del turno), con el turno CONFIRMADO. Ningún campo es
-   * obligatorio. 409 si ese servicio ya tiene ficha.
+   * `detalles[]` del turno), con el turno CONFIRMADO y desde que empieza
+   * ese servicio (su `horaInicio` en `detalles[]`; antes, 400). Ningún campo
+   * es obligatorio. 409 si ese servicio ya tiene ficha.
    */
   @Post('turnos/:id/fichas')
   create(
