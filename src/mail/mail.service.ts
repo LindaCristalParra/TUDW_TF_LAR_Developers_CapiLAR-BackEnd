@@ -2,8 +2,42 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { MailerService } from '@nestjs-modules/mailer';
 
+const VIOLETA = { color: '#A35FDA', fondo: '#FAF7FD' };
+
+/**
+ * Look of a turno email by what it's about: color of the top bar and the turno box, label in
+ * the box ("" = none) and emoji at the start of the subject.
+ */
+export const ESTILOS_MAIL = {
+  CONFIRMADO: {
+    color: '#2E7D32',
+    fondo: '#EEF6EE',
+    etiqueta: 'CONFIRMADO',
+    emoji: '✅',
+  },
+  CANCELADO: {
+    color: '#C62828',
+    fondo: '#FCEEEE',
+    etiqueta: 'CANCELADO',
+    emoji: '❌',
+  },
+  REPROGRAMADO: {
+    color: '#1565C0',
+    fondo: '#EDF3FB',
+    etiqueta: 'REPROGRAMADO',
+    emoji: '🔄',
+  },
+  PENDIENTE: { ...VIOLETA, etiqueta: 'PENDIENTE', emoji: '📩' },
+  // Rejected with alternatives: no label, "RECHAZADO" reads too harsh for the client.
+  OTRO_HORARIO: { ...VIOLETA, etiqueta: '', emoji: '🗓️' },
+  RECORDATORIO: { ...VIOLETA, etiqueta: 'RECORDATORIO', emoji: '⏰' },
+} as const;
+
+export type EstiloMail = keyof typeof ESTILOS_MAIL;
+
 /** Context of templates/turno.hbs. Every field is required (Handlebars runs in strict mode). */
 export interface MailTurno {
+  estilo: EstiloMail;
   titulo: string;
   nombre: string;
   mensaje: string;
@@ -43,12 +77,13 @@ export interface MailAgendaDiaria {
 
 /** Context of templates/serie.hbs (F05): the dates of a series, one line each. */
 export interface MailSerie {
+  estilo: EstiloMail;
   titulo: string;
   nombre: string;
   mensaje: string;
   // e.g. "Corte con Flor Fichera, cada semana a las 10:00"
   resumen: string;
-  // fecha e.g. "martes 8 de octubre"; detalle e.g. "10:00 · Confirmado"
+  // fecha e.g. "martes 8 de octubre"; detalle e.g. "10:00 h · Confirmado"
   fechas: { fecha: string; detalle: string }[];
   boton: string;
   // Front-end path the button opens, e.g. "/mis-turnos"
@@ -78,20 +113,23 @@ export class MailService {
     });
   }
 
-  // Every turno notice (request, confirmation, rejection, rescheduling...) uses the same template.
+  // Every turno notice (request, confirmation, rejection, rescheduling...) uses the same template;
+  // the style sets its colors, label and subject emoji.
   async sendTurno(
     email: string,
     asunto: string,
     contenido: MailTurno,
   ): Promise<void> {
     const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    const { emoji, ...estilo } = ESTILOS_MAIL[contenido.estilo];
 
     await this.mailerService.sendMail({
       to: email,
-      subject: asunto,
+      subject: `${emoji} ${asunto}`,
       template: 'turno',
       context: {
         ...contenido,
+        ...estilo,
         link: `${frontendUrl}${contenido.ruta}`,
         linkSecundario: contenido.rutaSecundaria
           ? `${frontendUrl}${contenido.rutaSecundaria}`
@@ -106,12 +144,17 @@ export class MailService {
     contenido: MailSerie,
   ): Promise<void> {
     const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    const { emoji, ...estilo } = ESTILOS_MAIL[contenido.estilo];
 
     await this.mailerService.sendMail({
       to: email,
-      subject: asunto,
+      subject: `${emoji} ${asunto}`,
       template: 'serie',
-      context: { ...contenido, link: `${frontendUrl}${contenido.ruta}` },
+      context: {
+        ...contenido,
+        ...estilo,
+        link: `${frontendUrl}${contenido.ruta}`,
+      },
     });
   }
 
