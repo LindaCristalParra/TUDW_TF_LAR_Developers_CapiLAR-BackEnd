@@ -21,6 +21,13 @@ export const ESTILOS_MAIL = {
     etiqueta: 'CANCELADO',
     emoji: '❌',
   },
+  // Canceled from the reminder with less than 12 h left (professional's email).
+  CANCELADO_TARDE: {
+    color: '#C62828',
+    fondo: '#FCEEEE',
+    etiqueta: 'CANCELADO',
+    emoji: '⚠️',
+  },
   REPROGRAMADO: {
     color: '#1565C0',
     fondo: '#EDF3FB',
