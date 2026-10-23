@@ -114,6 +114,24 @@ npm run test
 npm run test:e2e
 ```
 
+## External APIs (TP3)
+
+The apps never call these APIs directly: they go through the backend, so the keys stay on the server.
+
+### Gemini (TP3, API 3)
+
+AI hair diagnosis for the technical record. `POST /fichas/:id/diagnostico` (PROFESIONAL) sends the latest ANTES photo of the record to Gemini with a response schema built from the Prisma enums (`NivelCapilar`, `TipoDePelo`, `VolumenDePelo`) and returns a suggestion for porosity, elasticity, gray percentage, hair type and volume, plus a short note. **Nothing is saved**: the front-end preloads the form and the professional saves it with `PATCH /fichas/:id`. Any value outside its enum or range is dropped before answering.
+
+| Variable | Value |
+| --- | --- |
+| `GEMINI_API_KEY` | Key from [Google AI Studio](https://aistudio.google.com/apikey) |
+| `GEMINI_MODEL` | Flash model with image input (default `gemini-flash-latest`) |
+| `GEMINI_MODO` | `simulado`: fixed answer, no call to Gemini (no quota used). `real` or empty: calls Gemini |
+
+To turn on real mode, put the key in `.env`, set `GEMINI_MODO=real` and restart the server. The free tier has a per-minute limit (answered as 503) and Google may use the data to improve its products: use photos without faces or personal data.
+
+Errors: 400 if the record has no ANTES photo, 403 if it belongs to another professional, 400 if it is closed, 503 if Gemini is busy (429), 502 if it can't analyze the photo, 504 after 30 s.
+
 ## Project structure
 
 ```
