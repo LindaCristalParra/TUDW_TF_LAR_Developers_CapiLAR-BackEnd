@@ -104,6 +104,17 @@ npm run start:prod
 
 The API runs on `http://localhost:3000` by default.
 
+### YouCam (TP3, API 1)
+
+Virtual hair color try-on: `POST /hair-color/preview` (CLIENTE and PROFESIONAL) receives a selfie (`foto`, JPG or PNG up to 2 MB) and a `color` from the salon's chart, and returns a link to the photo with that color, valid for 2 hours. It uses the [YouCam AI Hair Color API](https://docs.perfectcorp.com/reference/ai_hair_color) from Perfect Corp through the server, so the key never reaches the apps. The selfie is kept in memory only: it is not saved to disk or to the database.
+
+| Variable | Value |
+| --- | --- |
+| `PERFECT_API_KEY` | API key from the YouCam API console (only needed in real mode). |
+| `YOUCAM_MODO` | `simulado`: returns the same selfie after 1.5 s without calling YouCam. `real` (or empty): calls YouCam. |
+
+To use the real API, set `PERFECT_API_KEY`, change `YOUCAM_MODO` to `real` and restart the app. Each try-on spends 1 unit of the YouCam account, so keep `simulado` while developing.
+
 ### Tests
 
 ```bash
