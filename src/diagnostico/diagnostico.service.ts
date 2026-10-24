@@ -6,7 +6,12 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { ApiError, GenerateContentResponse, GoogleGenAI } from '@google/genai';
+import {
+  ApiError,
+  GenerateContentResponse,
+  GoogleGenAI,
+  ThinkingLevel,
+} from '@google/genai';
 import {
   NivelCapilar,
   TipoDePelo,
@@ -25,7 +30,9 @@ export const SUGERENCIA_SIMULADA: SugerenciaDiagnostico = {
   simulado: true,
 };
 
-const MODELO_POR_DEFECTO = 'gemini-flash-latest';
+// A fixed model rather than gemini-flash-latest: the alias jumps to each new Flash, which is often
+// overloaded on the free tier right after launch (503 "high demand" or answers past 30 s).
+const MODELO_POR_DEFECTO = 'gemini-3.6-flash';
 const TIEMPO_MAXIMO_MS = 30_000;
 const MAX_OBSERVACIONES = 500;
 
@@ -157,6 +164,9 @@ export class DiagnosticoService {
         responseJsonSchema: ESQUEMA,
         // Low, so the same photo gives (almost) the same suggestion.
         temperature: 0.2,
+        // Flash 3.x models think at MEDIUM by default and can go past the 30 s limit; filling six
+        // fields from a photo doesn't need it. LOW is the lowest level every Flash 3.x accepts.
+        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         abortSignal,
       },
     });
@@ -169,7 +179,11 @@ export class DiagnosticoService {
         'El análisis de la foto tardó demasiado. Probá de nuevo.',
       );
     }
-    if (error instanceof ApiError && error.status === 429) {
+    // 429: our quota per minute; 503: the model is overloaded on Google's side. Both pass soon.
+    if (
+      error instanceof ApiError &&
+      (error.status === 429 || error.status === 503)
+    ) {
       return new ServiceUnavailableException(
         'El asistente de IA está ocupado. Probá en un minuto.',
       );

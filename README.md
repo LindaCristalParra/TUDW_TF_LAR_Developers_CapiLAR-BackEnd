@@ -125,12 +125,12 @@ AI hair diagnosis for the technical record. `POST /fichas/:id/diagnostico` (PROF
 | Variable | Value |
 | --- | --- |
 | `GEMINI_API_KEY` | Key from [Google AI Studio](https://aistudio.google.com/apikey) |
-| `GEMINI_MODEL` | Flash model with image input (default `gemini-flash-latest`) |
+| `GEMINI_MODEL` | Flash model with image input (default `gemini-3.6-flash`; better a fixed model than `gemini-flash-latest`, which jumps to each new Flash and is often overloaded right after launch) |
 | `GEMINI_MODO` | `simulado`: fixed answer, no call to Gemini (no quota used). `real` or empty: calls Gemini |
 
 To turn on real mode, put the key in `.env`, set `GEMINI_MODO=real` and restart the server. The free tier has a per-minute limit (answered as 503) and Google may use the data to improve its products: use photos without faces or personal data.
 
-Errors: 400 if the record has no ANTES photo, 403 if it belongs to another professional, 400 if it is closed, 503 if Gemini is busy (429), 502 if it can't analyze the photo, 504 after 30 s.
+Errors: 400 if the record has no ANTES photo, 403 if it belongs to another professional, 400 if it is closed, 503 if Gemini is busy (its 429 or 503), 502 if it can't analyze the photo, 504 after 30 s.
 
 ## Project structure
 

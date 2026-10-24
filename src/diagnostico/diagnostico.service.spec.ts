@@ -160,6 +160,22 @@ describe('DiagnosticoService', () => {
       );
     });
 
+    it('answers 503 when the model is overloaded on Google (503)', async () => {
+      const service = serviceReal(
+        jest
+          .fn()
+          .mockRejectedValue(
+            new ApiError({ message: 'high demand', status: 503 }),
+          ),
+      );
+
+      await expect(service.sugerir(FOTO, 'image/jpeg')).rejects.toThrow(
+        new ServiceUnavailableException(
+          'El asistente de IA está ocupado. Probá en un minuto.',
+        ),
+      );
+    });
+
     it('answers 502 on any other Gemini error', async () => {
       const service = serviceReal(
         jest
