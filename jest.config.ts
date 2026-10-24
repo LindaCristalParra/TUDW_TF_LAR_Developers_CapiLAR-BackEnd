@@ -15,9 +15,17 @@ const config: Config = {
   rootDir: '.',
   testRegex: '.*\\.spec\\.ts$',
   transform: {
-    '^.+\\.(t|j)s$': 'ts-jest',
+    // TypeScript 6 requires an explicit rootDir (TS5011) when the files are not all in one folder.
+    '^.+\\.(t|j)s$': [
+      'ts-jest',
+      { tsconfig: { ...tsconfig?.compilerOptions, rootDir: '.' } },
+    ],
   },
-  moduleNameMapper: pathsToModuleNameMapper(paths, { prefix: '<rootDir>/' }),
+  moduleNameMapper: {
+    ...pathsToModuleNameMapper(paths, { prefix: '<rootDir>/' }),
+    // The generated Prisma client imports its .ts files with a .js extension (nodenext).
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+  },
   collectCoverageFrom: [
     'src/**/*.(t|j)s',
     'libs/**/*.(t|j)s',

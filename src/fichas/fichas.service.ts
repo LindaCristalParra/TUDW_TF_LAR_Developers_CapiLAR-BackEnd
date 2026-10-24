@@ -229,6 +229,23 @@ export class FichasService {
     return this.findOne(id);
   }
 
+  // The latest ANTES photo, for the AI suggestion (TP3, API 3). Same rules as editing the record:
+  // only the professional of that service, while it's open.
+  async fotoAntesParaDiagnostico(
+    id: number,
+    actor: PublicUser,
+  ): Promise<{ buffer: Buffer; mime: string }> {
+    const ficha = await this.findParaEditar(id, actor);
+    // fichaInclude orders the photos by id, so the last one is the newest.
+    const foto = ficha.fotos.filter((f) => f.tipo === MomentoFoto.ANTES).at(-1);
+    if (!foto) {
+      throw new BadRequestException(
+        'Subí una foto de ANTES para pedir la sugerencia',
+      );
+    }
+    return this.fotosService.leerArchivo(foto.archivo);
+  }
+
   // Any professional; the client only their own, once the record is closed (404 otherwise).
   async verFoto(
     id: number,

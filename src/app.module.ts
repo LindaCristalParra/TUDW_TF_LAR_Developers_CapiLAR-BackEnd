@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
+import { DiagnosticoModule } from './diagnostico/diagnostico.module';
 import { FichasModule } from './fichas/fichas.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProfesionalesModule } from './profesionales/profesionales.module';
@@ -23,6 +24,8 @@ import { TurnosModule } from './turnos/turnos.module';
     TurnosModule,
     FichasModule,
     SeriesModule,
+    // TP3, API 3: AI hair diagnosis with Gemini.
+    DiagnosticoModule,
   ],
   controllers: [AppController],
   providers: [AppService],

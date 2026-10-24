@@ -7,5 +7,7 @@ import { FichasService } from './fichas.service';
   imports: [FotosModule],
   controllers: [FichasController],
   providers: [FichasService],
+  // DiagnosticoModule uses it to get the ANTES photo with the record's rules.
+  exports: [FichasService],
 })
 export class FichasModule {}
