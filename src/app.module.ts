@@ -5,6 +5,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { FichasModule } from './fichas/fichas.module';
+import { HairColorModule } from './hair-color/hair-color.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProfesionalesModule } from './profesionales/profesionales.module';
 import { SeriesModule } from './series/series.module';
@@ -23,6 +24,8 @@ import { TurnosModule } from './turnos/turnos.module';
     TurnosModule,
     FichasModule,
     SeriesModule,
+    // TP3, API 1: hair color try-on with YouCam.
+    HairColorModule,
   ],
   controllers: [AppController],
   providers: [AppService],
