@@ -51,7 +51,8 @@ export class AuthController {
    *
    * @remarks Crea una cuenta CLIENTE, inicia la sesión (igual que el login) y manda un
    * mail de bienvenida. 409 si el email ya está registrado (también si la cuenta está
-   * dada de baja).
+   * dada de baja). Las alergias se eligen de `GET /alergias` (`alergiaIds`); 400 si
+   * alguna no existe o está dada de baja.
    */
   @Post('register')
   @X_CLIENT
@@ -175,7 +176,8 @@ export class AuthController {
   /**
    * Ver mi usuario
    *
-   * @remarks Devuelve el usuario del token, con `cliente` (alergia) o `profesional` (legajo).
+   * @remarks Devuelve el usuario del token, con `cliente` (`alergias` de la lista como
+   * `[{ id, nombre }]` y `alergia`, "Otra") o `profesional` (legajo).
    */
   @Get('me')
   @UseGuards(JwtAuthGuard)

@@ -70,7 +70,7 @@ export interface TurnoAgendaDiaria {
   cliente: string;
   telefono: string;
   servicios: string;
-  // "" when the client has none
+  // The ones from the list and "Other", comma separated; "" when the client has none
   alergia: string;
 }
 

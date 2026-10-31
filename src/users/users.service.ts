@@ -6,7 +6,13 @@ import {
   NotFoundException,
   StreamableFile,
 } from '@nestjs/common';
-import { Prisma, Rol, Usuario } from '../generated/prisma/client';
+import {
+  AlergiaDeCliente,
+  alergiasDeClienteSelect,
+  aplanarAlergias,
+} from '../alergias/alergias-de-cliente';
+import { AlergiasService } from '../alergias/alergias.service';
+import { Cliente, Prisma, Rol, Usuario } from '../generated/prisma/client';
 import {
   ahoraEnSalon,
   dateAFecha,
@@ -21,7 +27,7 @@ import { VerificacionEmailService } from './verificacion-email.service';
 
 // Subtype rows (DER: Cliente / Profesional) loaded with the user.
 const perfilInclude = {
-  cliente: true,
+  cliente: { include: { alergias: alergiasDeClienteSelect } },
   profesional: true,
 } satisfies Prisma.UsuarioInclude;
 
@@ -30,6 +36,7 @@ export type UsuarioConPerfil = Prisma.UsuarioGetPayload<{
 }>;
 
 // fechaNacimiento travels as "YYYY-MM-DD" (or null), like the other dates of the API.
+// cliente.alergias as `[{ id, nombre }]`.
 export type PublicUser = Omit<
   UsuarioConPerfil,
   | 'contrasena'
@@ -38,7 +45,11 @@ export type PublicUser = Omit<
   | 'verificacionToken'
   | 'verificacionTokenExpira'
   | 'fechaNacimiento'
-> & { fechaNacimiento: string | null };
+  | 'cliente'
+> & {
+  fechaNacimiento: string | null;
+  cliente: (Cliente & { alergias: AlergiaDeCliente[] }) | null;
+};
 
 const FECHA_NACIMIENTO_MINIMA = '1900-01-01';
 
@@ -51,12 +62,39 @@ const clienteResumenSelect = {
   telefono: true,
   // null = not verified yet: the salon can still book for her.
   emailVerificadoEn: true,
-  cliente: { select: { alergia: true, foto: true } },
+  cliente: {
+    select: { alergia: true, foto: true, alergias: alergiasDeClienteSelect },
+  },
 } satisfies Prisma.UsuarioSelect;
 
-export type ClienteResumen = Prisma.UsuarioGetPayload<{
+type ClienteResumenFila = Prisma.UsuarioGetPayload<{
   select: typeof clienteResumenSelect;
 }>;
+
+export type ClienteResumen = Omit<ClienteResumenFila, 'cliente'> & {
+  cliente: {
+    alergia: string | null;
+    foto: string | null;
+    alergias: AlergiaDeCliente[];
+  } | null;
+};
+
+function aClienteResumen<T extends ClienteResumenFila>(
+  usuario: T,
+): Omit<T, 'cliente'> & Pick<ClienteResumen, 'cliente'> {
+  const { cliente } = usuario;
+  return {
+    ...usuario,
+    cliente: cliente && {
+      ...cliente,
+      alergias: aplanarAlergias(cliente.alergias),
+    },
+  };
+}
+
+function aFilas(alergiaIds: number[]) {
+  return alergiaIds.map((alergiaId) => ({ alergiaId }));
+}
 
 // Nested write for usuario.update: closes every open session (all devices).
 function revocarSesiones() {
@@ -72,6 +110,7 @@ function revocarSesiones() {
 export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly alergiasService: AlergiasService,
     private readonly fotosService: FotosService,
     private readonly verificacionEmail: VerificacionEmailService,
   ) {}
@@ -103,11 +142,16 @@ export class UsersService {
       throw new ConflictException('El email ya está registrado');
     }
     // By role, not by the Cliente row: that row is kept when a client is promoted.
-    if (dto.alergia !== undefined && user.rol !== Rol.CLIENTE) {
+    const tocaAlergias =
+      dto.alergia !== undefined || dto.alergiaIds !== undefined;
+    if (tocaAlergias && user.rol !== Rol.CLIENTE) {
       throw new BadRequestException('Solo los clientes pueden cargar alergias');
     }
+    const alergiaIds =
+      dto.alergiaIds &&
+      (await this.alergiasService.validarIds(dto.alergiaIds, user.id));
 
-    const alergia = dto.alergia || null;
+    const alergia = dto.alergia === undefined ? undefined : dto.alergia || null;
     // A new email has to be verified again (the old link stops working).
     const cambiaEmail = email !== undefined && email !== user.email;
     const updated = await this.prisma.usuario.update({
@@ -127,10 +171,24 @@ export class UsersService {
           dto.fechaNacimiento === undefined || dto.fechaNacimiento === null
             ? dto.fechaNacimiento
             : this.fechaNacimientoADate(dto.fechaNacimiento),
-        cliente:
-          dto.alergia === undefined
-            ? undefined
-            : { upsert: { create: { alergia }, update: { alergia } } },
+        // The list is replaced as a whole (same transaction as the rest of the update).
+        cliente: tocaAlergias
+          ? {
+              upsert: {
+                create: {
+                  alergia,
+                  alergias: alergiaIds && { create: aFilas(alergiaIds) },
+                },
+                update: {
+                  alergia,
+                  alergias: alergiaIds && {
+                    deleteMany: {},
+                    create: aFilas(alergiaIds),
+                  },
+                },
+              },
+            }
+          : undefined,
       },
       include: perfilInclude,
     });
@@ -174,8 +232,8 @@ export class UsersService {
   }
 
   // Active clients, for PROFESIONAL / ADMIN to book a turno on their behalf.
-  findClientes(search?: string): Promise<ClienteResumen[]> {
-    return this.prisma.usuario.findMany({
+  async findClientes(search?: string): Promise<ClienteResumen[]> {
+    const clientes = await this.prisma.usuario.findMany({
       where: {
         rol: Rol.CLIENTE,
         fechaBaja: null,
@@ -191,6 +249,7 @@ export class UsersService {
       orderBy: [{ apellido: 'asc' }, { nombre: 'asc' }],
       select: clienteResumenSelect,
     });
+    return clientes.map(aClienteResumen);
   }
 
   // One client for the salon, also after a baja (fechaBaja tells it): her history stays.
@@ -209,7 +268,7 @@ export class UsersService {
     }
     const { fechaNacimiento } = usuario;
     return {
-      ...usuario,
+      ...aClienteResumen(usuario),
       fechaNacimiento: fechaNacimiento ? dateAFecha(fechaNacimiento) : null,
     };
   }
@@ -389,11 +448,16 @@ export class UsersService {
       verificacionToken: _verificacionToken,
       verificacionTokenExpira: _verificacionTokenExpira,
       fechaNacimiento,
+      cliente,
       ...publicUser
     } = user;
     return {
       ...publicUser,
       fechaNacimiento: fechaNacimiento ? dateAFecha(fechaNacimiento) : null,
+      cliente: cliente && {
+        ...cliente,
+        alergias: aplanarAlergias(cliente.alergias),
+      },
     };
   }
 

@@ -80,7 +80,8 @@ export class TurnosController {
    * Agenda (PROFESIONAL o ADMIN)
    *
    * @remarks Turnos entre dos fechas (máx. 31 días), con nombre, teléfono y
-   * alergia del cliente. Solo lectura: con `legajo`, la de ese profesional;
+   * alergias del cliente (`cliente.alergias` de la lista y `cliente.alergia`,
+   * "Otra"). Solo lectura: con `legajo`, la de ese profesional;
    * sin `legajo`, la de todo el salón.
    */
   @Get('agenda')

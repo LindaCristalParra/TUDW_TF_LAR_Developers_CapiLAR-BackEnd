@@ -1,5 +1,8 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEmail,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -7,6 +10,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import { MAX_ALERGIAS } from '../../alergias/alergias-de-cliente';
 import { Trim } from '../../auth/dto/trim.decorator';
 import { IsFecha } from '../../common/fecha-hora';
 
@@ -51,8 +55,21 @@ export class UpdateProfileDto {
   telefono?: string;
 
   /**
-   * Solo para CLIENTE. `""` o `null` la borra.
-   * @example "Amoníaco"
+   * Solo para CLIENTE. `id` de las alergias de `GET /alergias`: reemplaza la lista
+   * entera (`[]` las quita todas). Se pueden reenviar las que ya tiene aunque estén dadas de baja.
+   * @example [2, 5]
+   */
+  @IsInt({ each: true, message: 'Cada alergia debe ser un id numérico' })
+  @ArrayMaxSize(MAX_ALERGIAS, {
+    message: `No se pueden elegir más de ${MAX_ALERGIAS} alergias`,
+  })
+  @IsArray({ message: 'alergiaIds debe ser una lista' })
+  @IsOptional()
+  alergiaIds?: number[];
+
+  /**
+   * Solo para CLIENTE. "Otra": lo que no está en la lista. `""` o `null` la borra.
+   * @example "Aceite de coco"
    */
   @MaxLength(255, {
     message: 'La alergia no puede superar los 255 caracteres',

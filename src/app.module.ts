@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AlergiasModule } from './alergias/alergias.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
@@ -20,6 +21,7 @@ import { TurnosModule } from './turnos/turnos.module';
     PrismaModule,
     AuthModule,
     ServiciosModule,
+    AlergiasModule,
     ProfesionalesModule,
     TurnosModule,
     FichasModule,
