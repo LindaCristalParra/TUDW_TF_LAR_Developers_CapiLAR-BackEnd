@@ -1,0 +1,407 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum Rol {
+  ADMIN
+  PROFESIONAL
+  CLIENTE
+}
+
+enum MetodoPago {
+  EFECTIVO
+  DEBITO
+  CREDITO
+  TRANSFERENCIA
+}
+
+// PENDIENTE: requested by the client, waiting for a professional.
+// REPROGRAMADO: moved by the salon, waiting for the client to accept.
+// RECHAZADO and CANCELADO free the time slot.
+enum EstadoTurno {
+  PENDIENTE
+  CONFIRMADO
+  REPROGRAMADO
+  COMPLETADO
+  RECHAZADO
+  CANCELADO
+  AUSENTE
+}
+
+model Usuario {
+  id                      Int       @id @default(autoincrement())
+  nombre                  String
+  apellido                String
+  email                   String    @unique
+  telefono                String
+  fechaNacimiento         DateTime? @db.Date
+  contrasena              String
+  rol                     Rol
+  fechaAlta               DateTime  @default(now())
+  fechaBaja               DateTime?
+  resetToken              String?
+  resetTokenExpira        DateTime?
+  // null = email not verified. A client has to verify it to book by herself.
+  emailVerificadoEn       DateTime?
+  // SHA-256 of the verification link token (like resetToken), 7 days, single use.
+  verificacionToken       String?
+  verificacionTokenExpira DateTime?
+
+  cliente     Cliente?
+  profesional Profesional?
+
+  notificaciones Notificacion[]
+  sesiones       Sesion[]
+}
+
+// One per login (device), so the web and the app can be open at the same time.
+// Each refresh rotates the token and keeps the sid. The row stays after logout (revocadaEn).
+model Sesion {
+  // The sid of the refresh token: random, created at login.
+  sid        String    @id @db.Char(32)
+  usuarioId  Int
+  // SHA-256 of the current refresh token of this session.
+  tokenHash  String    @db.Char(64)
+  vence      DateTime
+  // Logout, reuse of an old token, password change or reset, or deactivation. null = active.
+  revocadaEn DateTime?
+  creadaEn   DateTime  @default(now())
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@index([usuarioId])
+}
+
+// Subtypes of Usuario (DER). They share the user's lifecycle, so no fechaBaja of their own.
+model Cliente {
+  usuarioId Int     @id
+  // "Other" allergy: free text for what is not in the Alergia list.
+  alergia   String? @db.VarChar(255)
+  // File name of the profile photo inside UPLOADS_DIR.
+  foto      String? @db.VarChar(100)
+
+  usuario  Usuario          @relation(fields: [usuarioId], references: [id])
+  alergias ClienteAlergia[]
+  turnos   Turno[]
+  series   SerieTurno[]
+}
+
+// Allergy list managed by the ADMIN (F01). fechaBaja: no longer offered, but clients who have it keep it.
+model Alergia {
+  id          Int       @id @default(autoincrement())
+  nombre      String    @unique @db.VarChar(100)
+  descripcion String?   @db.VarChar(255)
+  fechaBaja   DateTime?
+
+  clientes ClienteAlergia[]
+}
+
+model ClienteAlergia {
+  clienteId Int
+  alergiaId Int
+
+  cliente Cliente @relation(fields: [clienteId], references: [usuarioId])
+  alergia Alergia @relation(fields: [alergiaId], references: [id])
+
+  @@id([clienteId, alergiaId])
+  @@index([alergiaId])
+}
+
+model Profesional {
+  legajo    Int     @id @default(autoincrement())
+  usuarioId Int     @unique
+  // File name of the profile photo inside UPLOADS_DIR.
+  foto      String? @db.VarChar(100)
+
+  usuario         Usuario                 @relation(fields: [usuarioId], references: [id])
+  servicios       ProfesionalServicio[]
+  disponibilidad  DisponibilidadHoraria[]
+  detallesDeTurno TurnoDetalle[]
+  series          SerieTurno[]
+}
+
+// Times of day are "HH:mm" strings in the salon's local time, so there are no time zone shifts.
+// fechaBaja on Servicio and DisponibilidadHoraria: logical delete (ARQ-01).
+// A date without working hours is a day off (there are no separate schedule blocks).
+
+model Servicio {
+  id                 Int       @id @default(autoincrement())
+  tipo               String    @db.VarChar(100)
+  descripcion        String?   @db.VarChar(500)
+  // File name in UPLOADS_DIR (served by GET /servicios/:id/foto).
+  foto               String?   @db.VarChar(100)
+  // Minutes.
+  tiempoDuracion     Int
+  precio             Decimal   @db.Decimal(10, 2)
+  // A client's booking with one of these stays PENDIENTE until a professional accepts it.
+  requiereEvaluacion Boolean   @default(false)
+  fechaBaja          DateTime?
+
+  profesionales   ProfesionalServicio[]
+  detallesDeTurno TurnoDetalle[]
+  series          SerieTurno[]
+}
+
+// Services a professional can do. Removing one sets fechaBaja; assigning it again clears it.
+model ProfesionalServicio {
+  profesionalId Int
+  servicioId    Int
+  fechaBaja     DateTime?
+
+  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
+  servicio    Servicio    @relation(fields: [servicioId], references: [id])
+
+  @@id([profesionalId, servicioId])
+  @@index([servicioId])
+}
+
+// Weekly working hours of a professional.
+model DisponibilidadHoraria {
+  id            Int       @id @default(autoincrement())
+  profesionalId Int
+  // Working hours of one specific date (not a weekly template).
+  fecha         DateTime  @db.Date
+  horarioInicio String    @db.Char(5)
+  horarioFin    String    @db.Char(5)
+  fechaBaja     DateTime?
+
+  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
+
+  @@index([profesionalId, fecha])
+}
+
+// A cancelled turno keeps its row with estado CANCELADO (logical delete).
+model Turno {
+  id                     Int         @id @default(autoincrement())
+  clienteId              Int
+  fecha                  DateTime    @db.Date
+  horaInicio             String      @db.Char(5)
+  horaFin                String      @db.Char(5)
+  metodoPago             MetodoPago?
+  estado                 EstadoTurno @default(PENDIENTE)
+  // Why it was rejected (internal, not shown to the client) or canceled (shown to both sides).
+  motivo                 String?     @db.VarChar(500)
+  // When the client confirmed they will come (from the app or the reminder). Reset on rescheduling.
+  asistenciaConfirmadaEn DateTime?
+  // F05: the series this turno belongs to (created with it, or booked by the client for one of its dates).
+  serieId                Int?
+
+  cliente        Cliente        @relation(fields: [clienteId], references: [usuarioId])
+  serie          SerieTurno?    @relation("TurnosDeLaSerie", fields: [serieId], references: [id])
+  detalles       TurnoDetalle[]
+  notificaciones Notificacion[]
+  // Series created from this turno.
+  seriesOrigen   SerieTurno[]   @relation("OrigenDeLaSerie")
+
+  @@index([fecha])
+}
+
+// SEMANAL 7 days, QUINCENAL 14, CADA_20_DIAS 20, MENSUAL every 4 weeks (28).
+enum FrecuenciaSerie {
+  SEMANAL
+  QUINCENAL
+  CADA_20_DIAS
+  MENSUAL
+}
+
+// SUSPENDIDA and BAJA cancel the future turnos of the series; reactivating creates them again.
+enum EstadoSerie {
+  ACTIVA
+  SUSPENDIDA
+  BAJA
+}
+
+// F05: a professional repeats one service of a CONFIRMADO turno, same time, every N days,
+// up to 60 days ahead (the booking window). Its dates are fechaInicio + N, + 2N... until fechaFin.
+model SerieTurno {
+  id            Int             @id @default(autoincrement())
+  clienteId     Int
+  // Legajo of the professional (who does the service and manages the series).
+  profesionalId Int
+  servicioId    Int
+  frecuencia    FrecuenciaSerie
+  // "HH:mm", the time of the original turno.
+  horaInicio    String          @db.Char(5)
+  // First date of the series (the original turno's date + the frequency) and last possible one.
+  fechaInicio   DateTime        @db.Date
+  fechaFin      DateTime        @db.Date
+  estado        EstadoSerie     @default(ACTIVA)
+  turnoOrigenId Int
+  creadaEn      DateTime        @default(now())
+
+  cliente     Cliente     @relation(fields: [clienteId], references: [usuarioId])
+  profesional Profesional @relation(fields: [profesionalId], references: [legajo])
+  servicio    Servicio    @relation(fields: [servicioId], references: [id])
+  turnoOrigen Turno       @relation("OrigenDeLaSerie", fields: [turnoOrigenId], references: [id])
+  turnos      Turno[]     @relation("TurnosDeLaSerie")
+
+  @@index([clienteId])
+  @@index([profesionalId])
+  @@index([turnoOrigenId])
+}
+
+// One row per service. Services run one after another in id order, each with its own professional.
+model TurnoDetalle {
+  id            Int     @id @default(autoincrement())
+  turnoId       Int
+  profesionalId Int
+  servicioId    Int
+  // Price when booked, so later price changes don't alter past turnos.
+  precioBase    Decimal @db.Decimal(10, 2)
+
+  turno       Turno          @relation(fields: [turnoId], references: [id])
+  profesional Profesional    @relation(fields: [profesionalId], references: [legajo])
+  servicio    Servicio       @relation(fields: [servicioId], references: [id])
+  fichas      FichaTecnica[]
+}
+
+enum NivelCapilar {
+  BAJA
+  MEDIA
+  ALTA
+}
+
+enum TipoDePelo {
+  LISO
+  ONDULADO
+  RIZADO
+  AFRO
+}
+
+enum VolumenDePelo {
+  FINO
+  MEDIO
+  GRUESO
+}
+
+// Technical record (F08) of one service of a turno, filled in by its professional.
+// Locked (cerradaEn) when the turno is completed. At most one active (fechaBaja null) per detalle,
+// checked in code: a unique index would block a new record after a logical delete.
+model FichaTecnica {
+  id                    Int            @id @default(autoincrement())
+  turnoDetalleId        Int
+  porosidad             NivelCapilar?
+  elasticidad           NivelCapilar?
+  // 0 to 100.
+  porcentajeCanas       Int?
+  tipoDePelo            TipoDePelo?
+  volumenDePelo         VolumenDePelo?
+  tratamientosPrevios   String?        @db.VarChar(1000)
+  // For the salon only.
+  observacionesInternas String?        @db.VarChar(1000)
+  // Care instructions for the client.
+  indicacionesCliente   String?        @db.VarChar(1000)
+  creadaEn              DateTime       @default(now())
+  actualizadaEn         DateTime       @updatedAt
+  cerradaEn             DateTime?
+  fechaBaja             DateTime?
+
+  turnoDetalle TurnoDetalle @relation(fields: [turnoDetalleId], references: [id])
+  formulas     Formula[]
+  fotos        FotoFicha[]
+
+  @@index([turnoDetalleId])
+}
+
+enum MomentoFoto {
+  ANTES
+  DESPUES
+}
+
+// Before/after photo of a technical record (up to 5 of each). The client sees them once the record is closed.
+model FotoFicha {
+  id       Int         @id @default(autoincrement())
+  fichaId  Int
+  tipo     MomentoFoto
+  // File name in UPLOADS_DIR (served by GET /fichas/:id/fotos/:fotoId).
+  archivo  String      @db.VarChar(100)
+  creadaEn DateTime    @default(now())
+
+  ficha FichaTecnica @relation(fields: [fichaId], references: [id])
+
+  @@index([fichaId])
+}
+
+enum UnidadInsumo {
+  G
+  ML
+  UNIDAD
+}
+
+// A mix applied during the service (F08), in order. Saved and replaced together with its record.
+model Formula {
+  id              Int     @id @default(autoincrement())
+  fichaId         Int
+  descripcion     String? @db.VarChar(500)
+  // Developer volume (e.g. 20 vol).
+  oxidanteVolumen Int?
+  tiempoPoseMin   Int?
+  // 1, 2, 3... in the order they were applied.
+  orden           Int
+
+  ficha   FichaTecnica    @relation(fields: [fichaId], references: [id])
+  insumos FormulaInsumo[]
+
+  @@index([fichaId])
+}
+
+model FormulaInsumo {
+  id         Int           @id @default(autoincrement())
+  formulaId  Int
+  producto   String        @db.VarChar(100)
+  marca      String?       @db.VarChar(100)
+  tono       String?       @db.VarChar(50)
+  cantidad   Decimal?      @db.Decimal(10, 2)
+  unidad     UnidadInsumo?
+  // Inventory item (F11). No foreign key until that table exists.
+  articuloId Int?
+
+  formula Formula @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+
+  @@index([formulaId])
+}
+
+enum MedioNotificacion {
+  EMAIL
+  WHATSAPP
+}
+
+enum TipoNotificacion {
+  RECORDATORIO
+  AGENDA_DIARIA
+}
+
+enum EstadoEnvio {
+  ENVIADO
+  ERROR
+}
+
+// Notices sent by scheduled jobs (F06 reminder, F07 daily agenda), one row per attempt.
+model Notificacion {
+  id          Int               @id @default(autoincrement())
+  // The reminder's turno; null for the daily agenda.
+  turnoId     Int?
+  // Who received it: the client (reminder) or the professional (daily agenda).
+  usuarioId   Int
+  medio       MedioNotificacion
+  tipo        TipoNotificacion
+  estadoEnvio EstadoEnvio
+  fechaEnvio  DateTime          @default(now())
+  // RECORDATORIO: start of the turno it was sent for (local wall-clock, like inicioDia). If the
+  // turno is rescheduled it no longer matches: the old link stops working and a new one goes out.
+  // AGENDA_DIARIA: the date of the agenda, so it is not sent twice for the same day.
+  inicioTurno DateTime?
+  // SHA-256 of the confirm/cancel link token (reminder only).
+  tokenHash   String?           @unique @db.Char(64)
+
+  turno   Turno?  @relation(fields: [turnoId], references: [id])
+  usuario Usuario @relation(fields: [usuarioId], references: [id])
+
+  @@index([turnoId, tipo])
+}
