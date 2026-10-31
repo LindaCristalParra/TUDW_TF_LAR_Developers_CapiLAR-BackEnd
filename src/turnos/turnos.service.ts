@@ -8,6 +8,10 @@ import {
 } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import {
+  alergiasDeClienteSelect,
+  aplanarAlergias,
+} from '../alergias/alergias-de-cliente';
+import {
   EstadoEnvio,
   EstadoSerie,
   EstadoTurno,
@@ -87,6 +91,7 @@ const turnoInclude = {
   cliente: {
     select: {
       alergia: true,
+      alergias: alergiasDeClienteSelect,
       usuario: {
         select: {
           id: true,
@@ -923,7 +928,10 @@ export class TurnosService {
           cliente: `${cliente.nombre} ${cliente.apellido}`,
           telefono: cliente.telefono,
           servicios: suyos.map((x) => x.servicio).join(', '),
-          alergia: cliente.alergia ?? '',
+          // The ones from the list, then "Other".
+          alergia: [...cliente.alergias.map((a) => a.nombre), cliente.alergia]
+            .filter(Boolean)
+            .join(', '),
         };
         const grupo =
           turno.estado === EstadoTurno.PENDIENTE
@@ -1181,7 +1189,7 @@ export class TurnosService {
         ...(opciones.paraCliente ? {} : { fichaId: d.fichas[0]?.id ?? null }),
       }),
     );
-    const { usuario, alergia } = turno.cliente;
+    const { usuario, alergia, alergias } = turno.cliente;
     return {
       id: turno.id,
       fecha: dateAFecha(turno.fecha),
@@ -1202,6 +1210,8 @@ export class TurnosService {
         nombre: usuario.nombre,
         apellido: usuario.apellido,
         telefono: usuario.telefono,
+        alergias: aplanarAlergias(alergias),
+        // "Other": free text for what is not in the list.
         alergia,
         // null = email not verified yet (the agenda shows it).
         emailVerificadoEn: usuario.emailVerificadoEn,

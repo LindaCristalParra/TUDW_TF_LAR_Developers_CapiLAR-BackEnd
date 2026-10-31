@@ -56,7 +56,8 @@ export class UsersController {
    *
    * @remarks Para elegir el cliente al cargar un turno a su nombre. Solo clientes
    * activos, ordenados por apellido y nombre, con `id`, `nombre`, `apellido`,
-   * `email`, `telefono` y `cliente.alergia`.
+   * `email`, `telefono`, `cliente.alergias` (`[{ id, nombre }]`, de la lista) y
+   * `cliente.alergia` ("Otra", texto libre).
    */
   @Get('clientes')
   @Roles(Rol.PROFESIONAL)
@@ -82,7 +83,8 @@ export class UsersController {
    * Editar mi perfil
    *
    * @remarks Se actualizan solo los campos enviados. 409 si el email ya lo usa otra
-   * cuenta; 400 si alguien que no es CLIENTE manda `alergia`.
+   * cuenta; 400 si alguien que no es CLIENTE manda `alergiaIds` o `alergia`, o si
+   * un id de `alergiaIds` no existe o está dado de baja (salvo que ya fuera suyo).
    */
   @Patch('me')
   updateMe(@Req() req: Request, @Body() dto: UpdateProfileDto) {

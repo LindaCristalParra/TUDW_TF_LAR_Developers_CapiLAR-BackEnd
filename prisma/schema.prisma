@@ -81,13 +81,36 @@ model Sesion {
 // Subtypes of Usuario (DER). They share the user's lifecycle, so no fechaBaja of their own.
 model Cliente {
   usuarioId Int     @id
+  // "Other" allergy: free text for what is not in the Alergia list.
   alergia   String? @db.VarChar(255)
   // File name of the profile photo inside UPLOADS_DIR.
   foto      String? @db.VarChar(100)
 
-  usuario Usuario      @relation(fields: [usuarioId], references: [id])
-  turnos  Turno[]
-  series  SerieTurno[]
+  usuario  Usuario          @relation(fields: [usuarioId], references: [id])
+  alergias ClienteAlergia[]
+  turnos   Turno[]
+  series   SerieTurno[]
+}
+
+// Allergy list managed by the ADMIN (F01). fechaBaja: no longer offered, but clients who have it keep it.
+model Alergia {
+  id          Int       @id @default(autoincrement())
+  nombre      String    @unique @db.VarChar(100)
+  descripcion String?   @db.VarChar(255)
+  fechaBaja   DateTime?
+
+  clientes ClienteAlergia[]
+}
+
+model ClienteAlergia {
+  clienteId Int
+  alergiaId Int
+
+  cliente Cliente @relation(fields: [clienteId], references: [usuarioId])
+  alergia Alergia @relation(fields: [alergiaId], references: [id])
+
+  @@id([clienteId, alergiaId])
+  @@index([alergiaId])
 }
 
 model Profesional {

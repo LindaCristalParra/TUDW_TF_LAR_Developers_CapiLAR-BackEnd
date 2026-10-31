@@ -1,5 +1,8 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsEmail,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -7,6 +10,7 @@ import {
   MaxLength,
   MinLength,
 } from 'class-validator';
+import { MAX_ALERGIAS } from '../../alergias/alergias-de-cliente';
 import { IsFecha } from '../../common/fecha-hora';
 import { HasLetterAndNumber } from './has-letter-and-number.decorator';
 import { Trim } from './trim.decorator';
@@ -49,8 +53,20 @@ export class RegisterDto {
   telefono: string;
 
   /**
-   * Alergias o sensibilidades conocidas (texto libre).
-   * @example "Amoníaco"
+   * Opcional. `id` de las alergias elegidas de `GET /alergias`.
+   * @example [2, 5]
+   */
+  @IsInt({ each: true, message: 'Cada alergia debe ser un id numérico' })
+  @ArrayMaxSize(MAX_ALERGIAS, {
+    message: `No se pueden elegir más de ${MAX_ALERGIAS} alergias`,
+  })
+  @IsArray({ message: 'alergiaIds debe ser una lista' })
+  @IsOptional()
+  alergiaIds?: number[];
+
+  /**
+   * "Otra": alergias o sensibilidades que no están en la lista (texto libre).
+   * @example "Aceite de coco"
    */
   @MaxLength(255, {
     message: 'La alergia no puede superar los 255 caracteres',

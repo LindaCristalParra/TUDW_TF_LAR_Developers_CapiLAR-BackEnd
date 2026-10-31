@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomBytes } from 'crypto';
+import { AlergiasService } from '../alergias/alergias.service';
 import { Rol } from '../generated/prisma/client';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -68,6 +69,7 @@ export class AuthService {
 
   constructor(
     private readonly usersService: UsersService,
+    private readonly alergiasService: AlergiasService,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
     private readonly verificacionEmail: VerificacionEmailService,
@@ -84,6 +86,10 @@ export class AuthService {
       throw new ConflictException('El email ya está registrado');
     }
 
+    const alergiaIds = await this.alergiasService.validarIds(
+      dto.alergiaIds ?? [],
+    );
+
     const user = await this.usersService.create({
       nombre: dto.nombre,
       apellido: dto.apellido,
@@ -95,7 +101,14 @@ export class AuthService {
       contrasena: await bcrypt.hash(dto.contrasena, BCRYPT_SALT_ROUNDS),
       // Public sign-up only creates clients; staff accounts are created by an admin.
       rol: Rol.CLIENTE,
-      cliente: { create: { alergia: dto.alergia } },
+      cliente: {
+        create: {
+          alergia: dto.alergia,
+          alergias: {
+            create: alergiaIds.map((alergiaId) => ({ alergiaId })),
+          },
+        },
+      },
     });
 
     // Not awaited: the account already exists, so a slow or failed email
