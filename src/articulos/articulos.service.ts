@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomInt } from 'crypto';
+import { esErrorPrisma } from '../common/errores-prisma';
 import { dateAFecha, esFechaValida, fechaADate } from '../common/fecha-hora';
 import { Prisma, UsoArticulo } from '../generated/prisma/client';
 import { MarcasService } from '../marcas/marcas.service';
@@ -90,10 +91,11 @@ export class ArticulosService {
         });
         return this.formatear(articulo);
       } catch (error) {
-        const choqueQr =
-          error instanceof Prisma.PrismaClientKnownRequestError &&
-          error.code === 'P2002';
-        if (!choqueQr || intento === 3) {
+        // The brand was deleted between the check and the insert.
+        if (esErrorPrisma(error, 'P2003')) {
+          throw new BadRequestException('La marca no existe');
+        }
+        if (!esErrorPrisma(error, 'P2002') || intento === 3) {
           throw error;
         }
       }
@@ -107,16 +109,25 @@ export class ArticulosService {
         throw new BadRequestException('La marca no existe');
       });
     }
-    const articulo = await this.prisma.articulo.update({
-      where: { id },
-      data: {
-        ...dto,
-        ...this.opcionales(dto),
-        fechaVencimiento: this.fechaVencimiento(dto.fechaVencimiento),
-      },
-      include: articuloInclude,
-    });
-    return this.formatear(articulo);
+    const data = {
+      ...dto,
+      ...this.opcionales(dto),
+      fechaVencimiento: this.fechaVencimiento(dto.fechaVencimiento),
+    };
+    try {
+      const articulo = await this.prisma.articulo.update({
+        where: { id },
+        data,
+        include: articuloInclude,
+      });
+      return this.formatear(articulo);
+    } catch (error) {
+      // The new brand was deleted between the check and the update.
+      if (esErrorPrisma(error, 'P2003')) {
+        throw new BadRequestException('La marca no existe');
+      }
+      throw error;
+    }
   }
 
   // Logical delete: it stops being offered, but records and movements keep pointing to it.
