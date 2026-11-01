@@ -6,9 +6,11 @@ import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
 import {
+  EstadoRemito,
   PrismaClient,
   Rol,
   TipoDeposito,
+  TipoRemito,
   TipoProducto,
   UnidadInsumo,
   UsoArticulo,
@@ -459,6 +461,30 @@ async function seedStock(prisma: PrismaClient) {
     qrs.add(nuevoQr());
   }
   const libres = [...qrs];
+  // Like an item created from the app, the initial stock enters as an INGRESO (by an admin).
+  const admin = await prisma.usuario.findFirst({
+    where: { rol: Rol.ADMIN, fechaBaja: null },
+    orderBy: { id: 'asc' },
+  });
+  if (!admin) {
+    throw new Error('The test stock needs an active admin to register it');
+  }
+  const stockInicial = (stock: number) =>
+    stock > 0
+      ? {
+          create: {
+            cantidad: stock,
+            remito: {
+              create: {
+                tipo: TipoRemito.INGRESO,
+                estado: EstadoRemito.APLICADO,
+                motivo: 'Stock inicial',
+                usuarioId: admin.id,
+              },
+            },
+          },
+        }
+      : undefined;
 
   // ~70 inserts: Prisma's default limit (5 s) can run out against a remote database, and then
   // nothing is loaded. One minute is plenty; it's a one-off script.
@@ -474,6 +500,7 @@ async function seedStock(prisma: PrismaClient) {
                 ...articulo,
                 precioVenta: precioVentaDePrueba(articulo),
                 qr: libres.pop()!,
+                remitoDetalles: stockInicial(articulo.stock),
               })),
             },
           },
@@ -487,7 +514,10 @@ async function seedStock(prisma: PrismaClient) {
 
 async function main() {
   const prisma = new PrismaClient({
-    adapter: new PrismaMariaDb(requireEnv('DATABASE_URL')),
+    // Text protocol, like PrismaService (with prepared statements every query waits ~40 ms).
+    adapter: new PrismaMariaDb(requireEnv('DATABASE_URL'), {
+      useTextProtocol: true,
+    }),
   });
   try {
     await seedAdmin(prisma);

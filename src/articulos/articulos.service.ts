@@ -6,7 +6,12 @@ import {
 import { randomInt } from 'crypto';
 import { esErrorPrisma } from '../common/errores-prisma';
 import { dateAFecha, esFechaValida, fechaADate } from '../common/fecha-hora';
-import { Prisma, UsoArticulo } from '../generated/prisma/client';
+import {
+  EstadoRemito,
+  Prisma,
+  TipoRemito,
+  UsoArticulo,
+} from '../generated/prisma/client';
 import { marcaParaApi } from '../marcas/marca-api';
 import { MarcasService } from '../marcas/marcas.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -33,6 +38,24 @@ function nuevoQr(): string {
     codigo += QR_LETRAS[randomInt(QR_LETRAS.length)];
   }
   return `ART-${codigo}`;
+}
+
+/** The INGRESO an item's initial stock enters with (nested in the item's create). */
+export function movimientoStockInicial(
+  stock: number,
+  usuarioId: number,
+): Prisma.RemitoDetalleCreateWithoutArticuloInput {
+  return {
+    cantidad: stock,
+    remito: {
+      create: {
+        tipo: TipoRemito.INGRESO,
+        estado: EstadoRemito.APLICADO,
+        motivo: 'Stock inicial',
+        usuario: { connect: { id: usuarioId } },
+      },
+    },
+  };
 }
 
 @Injectable()
@@ -74,13 +97,18 @@ export class ArticulosService {
     return this.formatear(await this.findOrFail(id));
   }
 
-  async create(dto: CreateArticuloDto) {
+  // The initial stock is the item's first movement (an INGRESO by whoever creates it), written in
+  // the same nested create, so the history always adds up to the stock.
+  async create(dto: CreateArticuloDto, usuarioId: number) {
     this.assertPrecioVenta(dto.uso, dto.precioVenta);
     await this.assertMarcaExiste(dto.marcaId);
     const data = {
       ...dto,
       ...this.opcionales(dto),
       fechaVencimiento: this.fechaVencimiento(dto.fechaVencimiento) ?? null,
+      remitoDetalles: dto.stock
+        ? { create: movimientoStockInicial(dto.stock, usuarioId) }
+        : undefined,
     };
     // The QR is random: on the (very unlikely) clash with another item, try a new one.
     for (let intento = 1; ; intento++) {
