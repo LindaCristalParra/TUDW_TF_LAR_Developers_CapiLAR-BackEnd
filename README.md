@@ -47,7 +47,7 @@ CapiLAR is split into separate repositories:
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org) LTS (20.x or higher) and npm
+- [Node.js](https://nodejs.org) 24.9 or higher and npm (Jest needs it to load NestJS 12, which ships as ES modules)
 - MySQL 8 (installed locally or running in Docker)
 - Git
 
@@ -121,9 +121,11 @@ To use the real API, set `PERFECT_API_KEY`, change `YOUCAM_MODO` to `real` and r
 # unit tests
 npm run test
 
-# end-to-end tests
+# end-to-end tests (start the whole app: needs the database running)
 npm run test:e2e
 ```
+
+Both run Jest through `node --experimental-vm-modules`; a plain `npx jest` fails to load `@nestjs/*`.
 
 ## Project structure
 
