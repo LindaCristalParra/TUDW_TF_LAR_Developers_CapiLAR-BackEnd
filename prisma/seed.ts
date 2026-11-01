@@ -15,6 +15,7 @@ import {
   UnidadInsumo,
   UsoArticulo,
 } from '../src/generated/prisma/client';
+import { urlConCachePreparadas } from '../src/prisma/database-url';
 
 const BCRYPT_SALT_ROUNDS = 10;
 
@@ -514,10 +515,10 @@ async function seedStock(prisma: PrismaClient) {
 
 async function main() {
   const prisma = new PrismaClient({
-    // Text protocol, like PrismaService (with prepared statements every query waits ~40 ms).
-    adapter: new PrismaMariaDb(requireEnv('DATABASE_URL'), {
-      useTextProtocol: true,
-    }),
+    // Like PrismaService: without the statement cache every query waits ~40 ms.
+    adapter: new PrismaMariaDb(
+      urlConCachePreparadas(requireEnv('DATABASE_URL')),
+    ),
   });
   try {
     await seedAdmin(prisma);
