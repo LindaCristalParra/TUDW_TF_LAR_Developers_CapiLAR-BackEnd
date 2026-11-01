@@ -34,7 +34,9 @@ export class ArticulosController {
    * @remarks Activos por defecto, ordenados por nombre, con su `marca` y
    * `bajoStock` (stock en el mínimo o debajo). `stock` y `stockMinAlert` van en
    * envases y, como los precios, llegan como texto (ej. "3.500", "12500.00").
-   * Para el selector de la ficha: `uso=SALON` (trae también los AMBOS).
+   * Para el selector de la ficha: `uso=SALON` (trae también los AMBOS). El
+   * PROFESIONAL recibe lo mismo que el ADMIN, `precioCosto` incluido (decisión
+   * del salón).
    */
   @Get()
   @Roles(Rol.ADMIN, Rol.PROFESIONAL)
@@ -46,6 +48,7 @@ export class ArticulosController {
    * Ver un artículo (ADMIN o PROFESIONAL)
    *
    * @remarks También uno dado de baja (`fechaBaja` con fecha). 404 si no existe.
+   * Igual que el listado, incluye `precioCosto` también para el PROFESIONAL.
    */
   @Get(':id')
   @Roles(Rol.ADMIN, Rol.PROFESIONAL)

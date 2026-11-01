@@ -247,6 +247,8 @@ export class ArticulosService {
   }
 
   // Decimals travel as text, like the other prices of the API (e.g. stock "3.500").
+  // The same shape for every role, precioCosto included: professionals may see cost prices
+  // (salon decision, 31/10), so it is not filtered by role on purpose.
   private formatear(articulo: ArticuloConMarca) {
     const { fechaVencimiento } = articulo;
     return {
