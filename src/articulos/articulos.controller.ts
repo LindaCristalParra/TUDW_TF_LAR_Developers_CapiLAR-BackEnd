@@ -36,7 +36,8 @@ export class ArticulosController {
    *
    * @remarks Activos por defecto, ordenados por nombre, con su `marca` y
    * `bajoStock` (stock en el mínimo o debajo). `stock` y `stockMinAlert` van en
-   * envases y, como los precios, llegan como texto (ej. "3.500", "12500.00").
+   * envases y, como los precios, llegan como texto sin ceros de más al final
+   * (ej. "3.5", "12500").
    * Para el selector de la ficha: `uso=SALON` (trae también los AMBOS). El
    * PROFESIONAL recibe lo mismo que el ADMIN, `precioCosto` incluido (decisión
    * del salón).

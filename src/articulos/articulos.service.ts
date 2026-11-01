@@ -287,7 +287,8 @@ export class ArticulosService {
     return fechaADate(fecha);
   }
 
-  // Decimals travel as text, like the other prices of the API (e.g. stock "3.500").
+  // Decimals travel as text without trailing zeros, like the other prices of the API (e.g. stock
+  // "3.5", precioCosto "8400").
   // The same shape for every role, precioCosto included: professionals may see cost prices
   // (salon decision, 31/10), so it is not filtered by role on purpose. Movements answer with it too.
   formatear(articulo: ArticuloConMarca) {

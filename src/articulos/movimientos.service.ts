@@ -23,7 +23,7 @@ type MovimientoConRemito = Prisma.RemitoDetalleGetPayload<{
   include: typeof movimientoInclude;
 }>;
 
-// cantidad is signed and travels as text, like the stock (e.g. "-1.500").
+// cantidad is signed and travels as text, like the stock (e.g. "-1.5").
 function movimientoParaApi(movimiento: MovimientoConRemito) {
   const { remito } = movimiento;
   return {

@@ -36,7 +36,8 @@ export class ServiciosController {
    * Listar los servicios que ofrece el salón
    *
    * @remarks Público, no hace falta iniciar sesión. Solo los activos.
-   * `precio` llega como texto con 2 decimales (ej. "15000.00").
+   * `precio` llega como texto, sin ceros de más al final (ej. "15000",
+   * "15000.5").
    */
   @Get()
   @Public()
