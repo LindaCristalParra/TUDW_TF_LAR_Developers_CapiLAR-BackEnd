@@ -19,8 +19,10 @@ import { CreateArticuloDto } from './dto/create-articulo.dto';
 import { ListArticulosQueryDto } from './dto/list-articulos-query.dto';
 import { UpdateArticuloDto } from './dto/update-articulo.dto';
 
+// envaseEnUso is null when no container is open.
 export const articuloInclude = {
   marca: true,
+  envaseEnUso: { select: { pesoActual: true, tipoPeso: true } },
 } satisfies Prisma.ArticuloInclude;
 
 export type ArticuloConMarca = Prisma.ArticuloGetPayload<{
@@ -97,6 +99,19 @@ export class ArticulosService {
     return this.formatear(await this.findOrFail(id));
   }
 
+  // What mobile and the front scan. Also inactive ones (fechaBaja tells it): the app decides what to
+  // show, and a missing code is a 404. The column's collation already ignores case.
+  async findByQr(codigo: string) {
+    const articulo = await this.prisma.articulo.findUnique({
+      where: { qr: codigo },
+      include: articuloInclude,
+    });
+    if (!articulo) {
+      throw new NotFoundException('Artículo no encontrado');
+    }
+    return this.formatear(articulo);
+  }
+
   // The initial stock is the item's first movement (an INGRESO by whoever creates it), written in
   // the same nested create, so the history always adds up to the stock.
   async create(dto: CreateArticuloDto, usuarioId: number) {
@@ -152,10 +167,36 @@ export class ArticulosService {
       fechaVencimiento: this.fechaVencimiento(dto.fechaVencimiento),
     };
     try {
-      const articulo = await this.prisma.articulo.update({
-        where: { id },
-        data,
-        include: articuloInclude,
+      if (dto.tipoPeso === undefined && dto.pesoInicial === undefined) {
+        const articulo = await this.prisma.articulo.update({
+          where: { id },
+          data,
+          include: articuloInclude,
+        });
+        return this.formatear(articulo);
+      }
+      const articulo = await this.prisma.$transaction(async (tx) => {
+        // The update locks the item's row first, so opening or updating the container (which lock
+        // it too) can't slip in between with the old unit or content.
+        await tx.articulo.update({ where: { id }, data });
+        // In another unit pesoActual means nothing: the open container is finished (decided 01/11).
+        if (dto.tipoPeso !== undefined) {
+          await tx.articuloUso.deleteMany({
+            where: { articuloId: id, tipoPeso: { not: dto.tipoPeso } },
+          });
+        }
+        // A smaller container can't hold more than it did: what's left is cut down to the new
+        // content (decided 01/11; most likely a typo fixed while the container stays in use).
+        if (dto.pesoInicial !== undefined) {
+          await tx.articuloUso.updateMany({
+            where: { articuloId: id, pesoActual: { gt: dto.pesoInicial } },
+            data: { pesoActual: dto.pesoInicial },
+          });
+        }
+        return tx.articulo.findUniqueOrThrow({
+          where: { id },
+          include: articuloInclude,
+        });
       });
       return this.formatear(articulo);
     } catch (error) {
@@ -274,7 +315,8 @@ export class ArticulosService {
     return fechaADate(fecha);
   }
 
-  // Decimals travel as text, like the other prices of the API (e.g. stock "3.500").
+  // Decimals travel as text without trailing zeros, like the other prices of the API (e.g. stock
+  // "3.5", precioCosto "8400").
   // The same shape for every role, precioCosto included: professionals may see cost prices
   // (salon decision, 31/10), so it is not filtered by role on purpose. Movements answer with it too.
   formatear(articulo: ArticuloConMarca) {

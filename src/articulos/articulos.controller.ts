@@ -36,7 +36,9 @@ export class ArticulosController {
    *
    * @remarks Activos por defecto, ordenados por nombre, con su `marca` y
    * `bajoStock` (stock en el mínimo o debajo). `stock` y `stockMinAlert` van en
-   * envases y, como los precios, llegan como texto (ej. "3.500", "12500.00").
+   * envases y, como los precios, llegan como texto sin ceros de más al final
+   * (ej. "3.5", "12500").
+   * `envaseEnUso` es el envase abierto (`{ pesoActual, tipoPeso }`) o null.
    * Para el selector de la ficha: `uso=SALON` (trae también los AMBOS). El
    * PROFESIONAL recibe lo mismo que el ADMIN, `precioCosto` incluido (decisión
    * del salón).
@@ -45,6 +47,20 @@ export class ArticulosController {
   @Roles(Rol.ADMIN, Rol.PROFESIONAL)
   findAll(@Query() query: ListArticulosQueryDto) {
     return this.articulosService.findAll(query);
+  }
+
+  /**
+   * Buscar un artículo por su QR (ADMIN o PROFESIONAL)
+   *
+   * @remarks Para el escaneo de mobile o del front: `codigo` es el texto del QR
+   * (ej. "ART-7K2M9QXP"). Devuelve lo mismo que `GET /articulos/:id`, también si
+   * está dado de baja (`fechaBaja` con fecha: la app decide qué mostrar). 404 si
+   * no hay ningún artículo con ese código.
+   */
+  @Get('qr/:codigo')
+  @Roles(Rol.ADMIN, Rol.PROFESIONAL)
+  findByQr(@Param('codigo') codigo: string) {
+    return this.articulosService.findByQr(codigo);
   }
 
   /**
@@ -80,7 +96,10 @@ export class ArticulosController {
    * @remarks Se actualizan solo los campos enviados; el stock no (cambia con los
    * movimientos). Se valida cómo queda el artículo: uso VENTA o AMBOS sin
    * `precioVenta` es 400; pasar a SALON borra el precio de venta (mandarlo con
-   * SALON es 400). 404 si no existe o está dado de baja; 400 si la marca no existe.
+   * SALON es 400). Cambiar `tipoPeso` termina el envase abierto (en otra unidad
+   * lo que quedaba no sirve); bajar `pesoInicial` recorta lo que queda en el
+   * envase abierto al contenido nuevo. 404 si no existe o está dado de baja;
+   * 400 si la marca no existe.
    */
   @Patch(':id')
   @Roles(Rol.ADMIN)

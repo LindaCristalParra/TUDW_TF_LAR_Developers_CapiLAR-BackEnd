@@ -439,8 +439,22 @@ model Articulo {
   marca Marca @relation(fields: [marcaId], references: [id])
 
   remitoDetalles RemitoDetalle[]
+  envaseEnUso    ArticuloUso?
 
   @@index([marcaId])
+}
+
+// The container currently open of an item (F11), one per item at most; finishing it deletes the row.
+// Informative: opening one doesn't move stock; a record's consumption lowers both stock and pesoActual.
+model ArticuloUso {
+  id         Int          @id @default(autoincrement())
+  articuloId Int          @unique
+  // What's left in the open container, in tipoPeso.
+  pesoActual Decimal      @db.Decimal(10, 2)
+  // Copied from the item, never sent by the front.
+  tipoPeso   UnidadInsumo
+
+  articulo Articulo @relation(fields: [articuloId], references: [id])
 }
 
 // COMPRA: a purchase from a supplier (F13). INGRESO/EGRESO/AJUSTE: manual movements, without supplier.
