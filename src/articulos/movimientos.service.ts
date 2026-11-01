@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Pagina, PaginacionQueryDto, paginar } from '../common/paginacion';
 import { EstadoRemito, Prisma, TipoRemito } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { articuloInclude, ArticulosService } from './articulos.service';
@@ -21,6 +22,22 @@ const movimientoInclude = {
 type MovimientoConRemito = Prisma.RemitoDetalleGetPayload<{
   include: typeof movimientoInclude;
 }>;
+
+// cantidad is signed and travels as text, like the stock (e.g. "-1.500").
+function movimientoParaApi(movimiento: MovimientoConRemito) {
+  const { remito } = movimiento;
+  return {
+    id: movimiento.id,
+    remitoId: remito.id,
+    fecha: remito.fecha,
+    tipo: remito.tipo,
+    estado: remito.estado,
+    cantidad: movimiento.cantidad,
+    motivo: remito.motivo,
+    numComprobante: remito.numComprobante,
+    usuario: remito.usuario,
+  };
+}
 
 @Injectable()
 export class MovimientosService {
@@ -51,21 +68,38 @@ export class MovimientosService {
       include: movimientoInclude,
     });
     return {
-      movimiento: this.formatear(movimiento),
+      movimiento: movimientoParaApi(movimiento),
       articulo: this.articulosService.formatear(articulo),
       stockNegativo: stock.isNegative(),
     };
   }
 
-  // The item's history, newest first. Also for an inactive item (404 only if it doesn't exist).
-  async findDeArticulo(articuloId: number) {
+  // The item's history, newest first, by pages. Also for an inactive item (404 only if it
+  // doesn't exist).
+  async findDeArticulo(
+    articuloId: number,
+    query: PaginacionQueryDto,
+  ): Promise<Pagina<ReturnType<typeof movimientoParaApi>>> {
     await this.articulosService.findOne(articuloId);
-    const movimientos = await this.prisma.remitoDetalle.findMany({
-      where: { articuloId },
-      orderBy: [{ remito: { fecha: 'desc' } }, { id: 'desc' }],
-      include: movimientoInclude,
-    });
-    return movimientos.map((m) => this.formatear(m));
+    const { pagina, porPagina, skip, take } = paginar(query);
+    const where = { articuloId };
+    // Both reads in one transaction, so the total matches the page.
+    const [movimientos, total] = await this.prisma.$transaction([
+      this.prisma.remitoDetalle.findMany({
+        where,
+        orderBy: [{ remito: { fecha: 'desc' } }, { id: 'desc' }],
+        include: movimientoInclude,
+        skip,
+        take,
+      }),
+      this.prisma.remitoDetalle.count({ where }),
+    ]);
+    return {
+      items: movimientos.map(movimientoParaApi),
+      total,
+      pagina,
+      porPagina,
+    };
   }
 
   // --- helpers ---
@@ -137,21 +171,5 @@ export class MovimientosService {
       throw new NotFoundException('Artículo no encontrado');
     }
     return new Prisma.Decimal(fila.stock);
-  }
-
-  // cantidad is signed and travels as text, like the stock (e.g. "-1.500").
-  private formatear(movimiento: MovimientoConRemito) {
-    const { remito } = movimiento;
-    return {
-      id: movimiento.id,
-      remitoId: remito.id,
-      fecha: remito.fecha,
-      tipo: remito.tipo,
-      estado: remito.estado,
-      cantidad: movimiento.cantidad,
-      motivo: remito.motivo,
-      numComprobante: remito.numComprobante,
-      usuario: remito.usuario,
-    };
   }
 }

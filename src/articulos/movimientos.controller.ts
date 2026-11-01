@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -12,6 +13,7 @@ import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { PaginacionQueryDto } from '../common/paginacion';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import type { PublicUser } from '../users/users.service';
@@ -50,14 +52,19 @@ export class MovimientosController {
   /**
    * Historial de stock de un artículo (ADMIN o PROFESIONAL)
    *
-   * @remarks Del más nuevo al más viejo, con el mismo formato que `movimiento`
-   * del POST: `cantidad` con signo (lo que cambió el stock), `tipo`, `motivo`,
-   * `numComprobante` y quién lo registró (`usuario`). El stock inicial del alta
-   * es un INGRESO "Stock inicial". También de un artículo dado de baja; 404 si
-   * no existe.
+   * @remarks Del más nuevo al más viejo, por páginas: `{ items, total, pagina,
+   * porPagina }` (por defecto 50 por página, máximo 200). Cada item tiene el
+   * mismo formato que `movimiento` del POST: `cantidad` con signo (lo que cambió
+   * el stock), `tipo`, `motivo`, `numComprobante` y quién lo registró
+   * (`usuario`). El stock inicial del alta es un INGRESO "Stock inicial".
+   * También de un artículo dado de baja; 404 si no existe. Una página después
+   * de la última trae `items` vacío.
    */
   @Get(':id/movimientos')
-  findDeArticulo(@Param('id', ParseIdPipe) id: number) {
-    return this.movimientosService.findDeArticulo(id);
+  findDeArticulo(
+    @Param('id', ParseIdPipe) id: number,
+    @Query() query: PaginacionQueryDto,
+  ) {
+    return this.movimientosService.findDeArticulo(id, query);
   }
 }
