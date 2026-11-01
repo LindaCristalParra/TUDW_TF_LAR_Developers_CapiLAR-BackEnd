@@ -180,17 +180,21 @@ export class FichasService {
   }
 
   // Logical delete, only while it's open: a closed one is part of the client's history.
+  // Conditional, so it can't win a race with completing the turno: a record closed (and discounted) in
+  // between stays, since ajustar skips deactivated ones and its CONSUMO couldn't be corrected anymore.
   async deactivate(id: number, actor: PublicUser): Promise<void> {
     const ficha = await this.findParaEditar(id, actor);
-    if (ficha.cerradaEn) {
+    const { count } = await this.prisma.fichaTecnica.updateMany({
+      where: { id: ficha.id, cerradaEn: null, fechaBaja: null },
+      data: { fechaBaja: new Date() },
+    });
+    if (!count) {
+      // Closed, or deactivated by a simultaneous request (findActiva → 404).
+      await this.findActiva(id);
       throw new BadRequestException(
         'La ficha está cerrada: el turno ya se completó',
       );
     }
-    await this.prisma.fichaTecnica.update({
-      where: { id: ficha.id },
-      data: { fechaBaja: new Date() },
-    });
   }
 
   async findOne(id: number) {
