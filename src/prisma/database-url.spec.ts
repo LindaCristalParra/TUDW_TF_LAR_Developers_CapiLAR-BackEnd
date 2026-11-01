@@ -12,20 +12,28 @@ jest.mock('mariadb', () => ({
 }));
 
 // The driver's own parsing of a connection string (what the pool really uses).
+interface OpcionesDriver {
+  prepareCacheLength: number;
+  user: string;
+  password: string;
+  host: string;
+  database: string;
+}
 const ConnectionOptions = jest.requireActual<
-  new (opts: string) => { prepareCacheLength: number }
+  new (opts: string) => OpcionesDriver
 >('mariadb/lib/config/connection-options');
 
 const URL_BASE =
   'mysql://root:p%40ss%3Aw%2Frd@localhost:3306/capilar_db?allowPublicKeyRetrieval=true';
 
-/** The prepareCacheLength the driver ends up with when the adapter gets this URL. */
-async function cacheDelDriver(url: string): Promise<number> {
+/** The options the driver ends up with when the adapter gets this URL. */
+async function opcionesDelDriver(url: string): Promise<OpcionesDriver> {
   createPool.mockClear();
   await new PrismaMariaDb(url).connect();
-  const config = createPool.mock.calls[0][0];
-  return new ConnectionOptions(config).prepareCacheLength;
+  return new ConnectionOptions(createPool.mock.calls[0][0]);
 }
+const cacheDelDriver = async (url: string) =>
+  (await opcionesDelDriver(url)).prepareCacheLength;
 
 describe('urlConCachePreparadas', () => {
   it('turns the cache on and keeps the rest of the URL', () => {
@@ -57,5 +65,26 @@ describe('urlConCachePreparadas', () => {
 
   it('is needed: without it the adapter turns the cache off', async () => {
     expect(await cacheDelDriver(URL_BASE)).toBe(0);
+  });
+
+  // new URL() re-encodes some characters of the user info: the driver decodes them back, so the
+  // credentials it ends up with must be exactly the ones it got without this function.
+  it.each([
+    'p%40ss%3Aw%2Frd', // encoded @ : /
+    'a%23b%3Fc%25d%20e', // encoded # ? % and a space
+    'a;b=c[d]e^f|g`h{i}j"k\'l!m*n(o)p$q,r~s', // left as they are, some re-encoded by new URL()
+    '%C3%B1and%C3%BA%F0%9F%98%80', // ñandú and an emoji, encoded
+    'ñandú', // not encoded
+    '', // no password
+  ])('keeps the credentials the driver gets (password %j)', async (clave) => {
+    const url = `mysql://us%40er:${clave}@db.example.com:3307/capi_db?allowPublicKeyRetrieval=true`;
+    const sin = await opcionesDelDriver(url);
+    const con = await opcionesDelDriver(urlConCachePreparadas(url));
+    expect(con.password).toBe(sin.password);
+    expect([con.user, con.host, con.database]).toEqual([
+      'us@er',
+      'db.example.com',
+      'capi_db',
+    ]);
   });
 });
