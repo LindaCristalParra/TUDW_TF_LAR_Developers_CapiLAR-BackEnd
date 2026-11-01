@@ -51,7 +51,9 @@ export class FichasController {
    * `producto` (nombre), `marca` ("Marca Línea"), `tono` (tonalidad) y `unidad`
    * (tipoPeso) e ignora lo que venga. Solo artículos activos de uso SALON o
    * AMBOS (`GET /articulos?uso=SALON`); inexistente, dado de baja o VENTA → 400
-   * y no se guarda nada. Todavía no descuenta stock.
+   * y no se guarda nada. Guardar no mueve stock: se descuenta al completar el
+   * turno (`PATCH /turnos/:id/completar`), y ahí se calcula `costoSubtotal`
+   * de cada insumo con artículo (mientras está abierta, `null`).
    */
   @Post('turnos/:id/fichas')
   create(
@@ -167,6 +169,12 @@ export class FichasController {
    * en el alta, salvo que un artículo que ya estaba en esta ficha se puede
    * conservar aunque después se haya dado de baja o pasado a VENTA (agregarlo
    * nuevo, o en otra ficha, sigue siendo 400).
+   *
+   * Con la ficha cerrada, `formulas` también corrige el stock: se mueve solo la
+   * diferencia con lo ya descontado (un movimiento CONSUMO más; usar menos
+   * devuelve), `costoSubtotal` se recalcula con el precio actual y la respuesta
+   * suma `sinStock` (como en completar). Sin `formulas`, o con la ficha
+   * abierta, no hay `sinStock`.
    */
   @Patch('fichas/:id')
   update(
