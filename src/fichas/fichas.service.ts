@@ -127,13 +127,18 @@ export class FichasService {
   async update(id: number, dto: FichaDto, actor: PublicUser) {
     const ficha = await this.findParaEditar(id, actor);
     const { formulas, ...campos } = dto;
+    const yaEnLaFicha = new Set(
+      ficha.formulas.flatMap((f) =>
+        f.insumos.flatMap((i) => (i.articuloId != null ? [i.articuloId] : [])),
+      ),
+    );
     const actualizada = await this.prisma.fichaTecnica.update({
       where: { id: ficha.id },
       data: {
         ...this.limpiar(campos),
         formulas: formulas && {
           deleteMany: {},
-          create: await this.formulasData(formulas),
+          create: await this.formulasData(formulas, yaEnLaFicha),
         },
       },
       include: fichaInclude,
@@ -300,8 +305,9 @@ export class FichasService {
   // A supply with articuloId takes producto, marca, tono and unidad from the item.
   private async formulasData(
     formulas: FormulaDto[],
+    yaEnLaFicha = new Set<number>(),
   ): Promise<Prisma.FormulaCreateWithoutFichaInput[]> {
-    const articulos = await this.articulosDeInsumos(formulas);
+    const articulos = await this.articulosDeInsumos(formulas, yaEnLaFicha);
     return formulas.map((f, i) => ({
       descripcion: f.descripcion || null,
       oxidanteVolumen: f.oxidanteVolumen,
@@ -335,7 +341,11 @@ export class FichasService {
   }
 
   // Only active items used in the salon (SALON or AMBOS); anything else is a 400.
-  private async articulosDeInsumos(formulas: FormulaDto[]) {
+  // One deactivated after it was saved in this record (yaEnLaFicha) can stay, so the record can still be edited.
+  private async articulosDeInsumos(
+    formulas: FormulaDto[],
+    yaEnLaFicha: Set<number>,
+  ) {
     const ids = [
       ...new Set(
         formulas.flatMap((f) =>
@@ -357,7 +367,7 @@ export class FichasService {
       if (!articulo) {
         throw new BadRequestException(`El artículo ${id} no existe`);
       }
-      if (articulo.fechaBaja) {
+      if (articulo.fechaBaja && !yaEnLaFicha.has(id)) {
         throw new BadRequestException(
           `El artículo ${id} (${articulo.nombre}) está dado de baja`,
         );

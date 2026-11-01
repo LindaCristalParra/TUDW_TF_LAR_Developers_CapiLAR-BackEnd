@@ -45,6 +45,13 @@ export class FichasController {
    * `detalles[]` del turno), con el turno CONFIRMADO y desde que empieza
    * ese servicio (su `horaInicio` en `detalles[]`; antes, 400). Ningún campo
    * es obligatorio. 409 si ese servicio ya tiene ficha.
+   *
+   * Insumos: texto libre (`producto` obligatorio) o un artículo del inventario
+   * con `articuloId` + `cantidad` (en su unidad). Con artículo, el back completa
+   * `producto` (nombre), `marca` ("Marca Línea"), `tono` (tonalidad) y `unidad`
+   * (tipoPeso) e ignora lo que venga. Solo artículos activos de uso SALON o
+   * AMBOS (`GET /articulos?uso=SALON`); inexistente, dado de baja o VENTA → 400
+   * y no se guarda nada. Todavía no descuenta stock.
    */
   @Post('turnos/:id/fichas')
   create(
@@ -152,7 +159,10 @@ export class FichasController {
    * Editar una ficha (el profesional de ese servicio)
    *
    * @remarks Solo mientras está abierta: se cierra cuando el turno se completa.
-   * `null` (o `""` en los textos) borra un campo.
+   * `null` (o `""` en los textos) borra un campo. `formulas` enviado reemplaza
+   * todas las fórmulas; los insumos con `articuloId` se validan de nuevo como
+   * en el alta, salvo que un artículo que ya estaba en esta ficha y se dio de
+   * baja después se puede conservar (agregarlo nuevo sigue siendo 400).
    */
   @Patch('fichas/:id')
   update(
