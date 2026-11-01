@@ -212,8 +212,13 @@ export class FichasService {
     }
     const nombre = await this.fotosService.guardar(archivo);
     try {
-      await this.prisma.fotoFicha.create({
-        data: { fichaId: id, tipo, archivo: nombre },
+      // Through the record, so actualizadaEn shows the photo change too.
+      await this.prisma.fichaTecnica.update({
+        where: { id },
+        data: {
+          actualizadaEn: new Date(),
+          fotos: { create: { tipo, archivo: nombre } },
+        },
       });
     } catch (error) {
       await this.fotosService.borrar(nombre);
@@ -229,7 +234,10 @@ export class FichasService {
     if (!foto) {
       throw new NotFoundException('Foto no encontrada');
     }
-    await this.prisma.fotoFicha.delete({ where: { id: fotoId } });
+    await this.prisma.fichaTecnica.update({
+      where: { id },
+      data: { actualizadaEn: new Date(), fotos: { delete: { id: fotoId } } },
+    });
     await this.fotosService.borrar(foto.archivo);
     return this.findOne(id);
   }

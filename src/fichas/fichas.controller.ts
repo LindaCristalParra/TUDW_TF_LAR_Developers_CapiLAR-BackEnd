@@ -153,7 +153,8 @@ export class FichasController {
    *
    * @remarks También después de cerrada (cuando el turno se completa), desde el
    * historial de la clienta: ella ve los cambios en `GET /fichas/mias` y
-   * `actualizadaEn` muestra la última edición. Otro profesional: 403.
+   * `actualizadaEn` muestra la última edición (incluye subir o quitar fotos).
+   * Otro profesional: 403.
    * `null` (o `""` en los textos) borra un campo.
    */
   @Patch('fichas/:id')
