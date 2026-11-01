@@ -48,6 +48,20 @@ export class ArticulosController {
   }
 
   /**
+   * Buscar un artículo por su QR (ADMIN o PROFESIONAL)
+   *
+   * @remarks Para el escaneo de mobile o del front: `codigo` es el texto del QR
+   * (ej. "ART-7K2M9QXP"). Devuelve lo mismo que `GET /articulos/:id`, también si
+   * está dado de baja (`fechaBaja` con fecha: la app decide qué mostrar). 404 si
+   * no hay ningún artículo con ese código.
+   */
+  @Get('qr/:codigo')
+  @Roles(Rol.ADMIN, Rol.PROFESIONAL)
+  findByQr(@Param('codigo') codigo: string) {
+    return this.articulosService.findByQr(codigo);
+  }
+
+  /**
    * Ver un artículo (ADMIN o PROFESIONAL)
    *
    * @remarks También uno dado de baja (`fechaBaja` con fecha). 404 si no existe.

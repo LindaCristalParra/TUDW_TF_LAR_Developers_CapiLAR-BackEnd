@@ -97,6 +97,19 @@ export class ArticulosService {
     return this.formatear(await this.findOrFail(id));
   }
 
+  // What mobile and the front scan. Also inactive ones (fechaBaja tells it): the app decides what to
+  // show, and a missing code is a 404. The column's collation already ignores case.
+  async findByQr(codigo: string) {
+    const articulo = await this.prisma.articulo.findUnique({
+      where: { qr: codigo },
+      include: articuloInclude,
+    });
+    if (!articulo) {
+      throw new NotFoundException('Artículo no encontrado');
+    }
+    return this.formatear(articulo);
+  }
+
   // The initial stock is the item's first movement (an INGRESO by whoever creates it), written in
   // the same nested create, so the history always adds up to the stock.
   async create(dto: CreateArticuloDto, usuarioId: number) {
