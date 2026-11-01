@@ -18,6 +18,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { tramosDeDetalles } from '../turnos/agenda';
 import { PublicUser } from '../users/users.service';
+import { ConsumoService, gramosPorArticulo } from './consumo.service';
 import { CreateFichaDto } from './dto/create-ficha.dto';
 import { FichaDto } from './dto/ficha.dto';
 import { FormulaDto } from './dto/formula.dto';
@@ -55,6 +56,7 @@ export class FichasService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly fotosService: FotosService,
+    private readonly consumoService: ConsumoService,
   ) {}
 
   // Only the professional of that service, while the turno is CONFIRMADO and once the service started.
@@ -124,6 +126,8 @@ export class FichasService {
   }
 
   // Formulas sent → they replace the old ones (in the same update); not sent → untouched.
+  // A closed record's stock was already discounted: new formulas move only the difference (PWA-176),
+  // and sinStock tells which items went below 0.
   async update(id: number, dto: FichaDto, actor: PublicUser) {
     const ficha = await this.findParaEditar(id, actor);
     const { formulas, ...campos } = dto;
@@ -132,18 +136,47 @@ export class FichasService {
         f.insumos.flatMap((i) => (i.articuloId != null ? [i.articuloId] : [])),
       ),
     );
-    const actualizada = await this.prisma.fichaTecnica.update({
-      where: { id: ficha.id },
-      data: {
-        ...this.limpiar(campos),
-        formulas: formulas && {
-          deleteMany: {},
-          create: await this.formulasData(formulas, yaEnLaFicha),
-        },
+    const nuevas = formulas && (await this.formulasData(formulas, yaEnLaFicha));
+    const sinStock = await this.prisma.$transaction(
+      async (tx) => {
+        // Like completing the turno (record first, then items): an edit and a completion of the
+        // same record wait for each other, so the closing and the supplies are read as they are now.
+        await tx.$queryRaw`SELECT id FROM FichaTecnica WHERE id = ${id} FOR UPDATE`;
+        const actual = await tx.fichaTecnica.findUniqueOrThrow({
+          where: { id },
+          select: {
+            cerradaEn: true,
+            fechaBaja: true,
+            formulas: {
+              select: {
+                insumos: { select: { articuloId: true, cantidad: true } },
+              },
+            },
+          },
+        });
+        if (actual.fechaBaja) {
+          throw new NotFoundException('Ficha no encontrada');
+        }
+        await tx.fichaTecnica.update({
+          where: { id },
+          data: {
+            ...this.limpiar(campos),
+            formulas: nuevas && { deleteMany: {}, create: nuevas },
+          },
+        });
+        if (!nuevas || !actual.cerradaEn) {
+          return undefined;
+        }
+        const gramosAntes = gramosPorArticulo(
+          actual.formulas.flatMap((f) => f.insumos),
+        );
+        return this.consumoService.ajustar(tx, [{ id, gramosAntes }]);
       },
-      include: fichaInclude,
-    });
-    return this.formatear(actualizada);
+      // Like a manual movement: it may wait for other movements of the same items.
+      { maxWait: 10_000, timeout: 10_000 },
+    );
+    const actualizada = await this.findOne(id);
+    return sinStock ? { ...actualizada, sinStock } : actualizada;
   }
 
   // Logical delete, only while it's open: a closed one is part of the client's history.

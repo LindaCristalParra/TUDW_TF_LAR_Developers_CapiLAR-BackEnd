@@ -25,6 +25,19 @@ function sumar(mapa: Map<number, Decimal>, id: number, valor: Decimal) {
   mapa.set(id, (mapa.get(id) ?? new Decimal(0)).plus(valor));
 }
 
+// Supplies without an item don't count.
+export function gramosPorArticulo(
+  insumos: { articuloId: number | null; cantidad: Decimal | null }[],
+): GramosPorArticulo {
+  const gramos: GramosPorArticulo = new Map();
+  for (const { articuloId, cantidad } of insumos) {
+    if (articuloId != null) {
+      sumar(gramos, articuloId, cantidad ?? new Decimal(0));
+    }
+  }
+  return gramos;
+}
+
 // F11 consumption of the technical records (PWA-176): the stock follows what their supplies with an
 // item say. Each record's CONSUMO movements (Remito.fichaId) add up to what it has discounted so far,
 // so an edit only moves the difference, even if the item's pesoInicial changed in between.
