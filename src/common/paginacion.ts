@@ -3,11 +3,15 @@ import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
 const POR_PAGINA = 50;
 const MAX_POR_PAGINA = 200;
+// Without a cap a huge page (e.g. 1e20) makes a skip Prisma rejects (a 500). A million pages of
+// 200 is far beyond any list here.
+const MAX_PAGINA = 1_000_000;
 
 // Query string of a paginated list (?pagina=2&porPagina=50); extend it to add filters.
 // Decorators run bottom-up (see stopAtFirstError in main.ts).
 export class PaginacionQueryDto {
-  /** Desde 1. Por defecto 1. */
+  /** Desde 1. Por defecto 1, máximo 1.000.000. */
+  @Max(MAX_PAGINA, { message: 'La página no puede ser mayor a 1.000.000' })
   @Min(1, { message: 'La página debe ser 1 o más' })
   @IsInt({ message: 'La página debe ser un número entero' })
   @Type(() => Number)
