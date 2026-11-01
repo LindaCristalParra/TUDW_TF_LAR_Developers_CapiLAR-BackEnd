@@ -33,6 +33,7 @@ import {
   MailTurno,
   TurnoAgendaDiaria,
 } from '../mail/mail.service';
+import { ConsumoService } from '../fichas/consumo.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { fechasDeSerie } from '../series/fechas-serie';
 import { PublicUser } from '../users/users.service';
@@ -127,6 +128,7 @@ export class TurnosService {
     private readonly mailService: MailService,
     private readonly verificacionEmail: VerificacionEmailService,
     private readonly whatsAppService: WhatsAppService,
+    private readonly consumoService: ConsumoService,
   ) {}
 
   // turnoId (rescheduling) and clienteId (booking for a client) are for professionals only.
@@ -590,19 +592,39 @@ export class TurnosService {
         'El turno todavía no empezó: se completa desde su hora de inicio',
       );
     }
-    // The technical records of the turno are locked together with it (immutable history, FIC-01).
-    const [actualizado] = await this.prisma.$transaction([
-      this.prisma.turno.update({
-        where: { id },
-        data: { estado: EstadoTurno.COMPLETADO },
-        include: turnoInclude,
-      }),
-      this.prisma.fichaTecnica.updateMany({
-        where: { turnoDetalle: { turnoId: id }, cerradaEn: null },
-        data: { cerradaEn: new Date() },
-      }),
-    ]);
-    return this.formatear(actualizado);
+    // The technical records of the turno are closed together with it, and their supplies with an
+    // item are discounted from the stock (PWA-176). Without stock it is discounted anyway (decided
+    // 31/10) and sinStock tells which items went below 0.
+    const sinStock = await this.prisma.$transaction(
+      async (tx) => {
+        // Only if it's still CONFIRMADO: two "complete" at the same time can't discount twice.
+        const { count } = await tx.turno.updateMany({
+          where: { id, estado: EstadoTurno.CONFIRMADO },
+          data: { estado: EstadoTurno.COMPLETADO },
+        });
+        if (!count) {
+          throw new BadRequestException(
+            'Solo se pueden completar turnos confirmados',
+          );
+        }
+        await tx.fichaTecnica.updateMany({
+          where: { turnoDetalle: { turnoId: id }, cerradaEn: null },
+          data: { cerradaEn: new Date() },
+        });
+        const fichas = await tx.fichaTecnica.findMany({
+          where: { turnoDetalle: { turnoId: id }, fechaBaja: null },
+          select: { id: true },
+        });
+        return this.consumoService.ajustar(tx, fichas);
+      },
+      // Like a manual movement: it may wait for other movements of the same items.
+      { maxWait: 10_000, timeout: 10_000 },
+    );
+    const actualizado = await this.prisma.turno.findUniqueOrThrow({
+      where: { id },
+      include: turnoInclude,
+    });
+    return { ...this.formatear(actualizado), sinStock };
   }
 
   // CLIENTE: "I'll be there", for a CONFIRMADO turno that hasn't started. Confirming twice keeps the first date.
