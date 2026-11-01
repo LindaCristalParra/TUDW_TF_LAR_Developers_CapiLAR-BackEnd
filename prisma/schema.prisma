@@ -384,6 +384,8 @@ enum TipoProducto {
   TINTURA
   OXIDANTE
   DECOLORANTE
+  // Perm lotion.
+  PERMANENTE
   SHAMPOO
   ACONDICIONADOR
   MASCARA
