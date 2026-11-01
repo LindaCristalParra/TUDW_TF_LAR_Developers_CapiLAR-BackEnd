@@ -13,6 +13,7 @@ import {
   MomentoFoto,
   Prisma,
   Rol,
+  UsoArticulo,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { tramosDeDetalles } from '../turnos/agenda';
@@ -115,7 +116,7 @@ export class FichasService {
       data: {
         turnoDetalleId,
         ...this.limpiar(campos),
-        formulas: { create: this.formulasData(formulas ?? []) },
+        formulas: { create: await this.formulasData(formulas ?? []) },
       },
       include: fichaInclude,
     });
@@ -132,7 +133,7 @@ export class FichasService {
         ...this.limpiar(campos),
         formulas: formulas && {
           deleteMany: {},
-          create: this.formulasData(formulas),
+          create: await this.formulasData(formulas),
         },
       },
       include: fichaInclude,
@@ -296,22 +297,78 @@ export class FichasService {
   }
 
   // The order of the list is the order they were applied in (orden 1, 2, 3...).
-  private formulasData(
+  // A supply with articuloId takes producto, marca, tono and unidad from the item.
+  private async formulasData(
     formulas: FormulaDto[],
-  ): Prisma.FormulaCreateWithoutFichaInput[] {
+  ): Promise<Prisma.FormulaCreateWithoutFichaInput[]> {
+    const articulos = await this.articulosDeInsumos(formulas);
     return formulas.map((f, i) => ({
       descripcion: f.descripcion || null,
       oxidanteVolumen: f.oxidanteVolumen,
       tiempoPoseMin: f.tiempoPoseMin,
       orden: i + 1,
       insumos: {
-        create: (f.insumos ?? []).map((insumo) => ({
-          ...insumo,
-          marca: insumo.marca || null,
-          tono: insumo.tono || null,
-        })),
+        create: (f.insumos ?? []).map((insumo) => {
+          const articulo =
+            insumo.articuloId != null && articulos.get(insumo.articuloId);
+          if (!articulo) {
+            return {
+              producto: insumo.producto!,
+              marca: insumo.marca || null,
+              tono: insumo.tono || null,
+              cantidad: insumo.cantidad,
+              unidad: insumo.unidad,
+            };
+          }
+          const { razonSocial, linea } = articulo.marca;
+          return {
+            producto: articulo.nombre,
+            marca: linea ? `${razonSocial} ${linea}` : razonSocial,
+            tono: articulo.tonalidad,
+            cantidad: insumo.cantidad,
+            unidad: articulo.tipoPeso,
+            articuloId: articulo.id,
+          };
+        }),
       },
     }));
+  }
+
+  // Only active items used in the salon (SALON or AMBOS); anything else is a 400.
+  private async articulosDeInsumos(formulas: FormulaDto[]) {
+    const ids = [
+      ...new Set(
+        formulas.flatMap((f) =>
+          (f.insumos ?? []).flatMap((insumo) =>
+            insumo.articuloId != null ? [insumo.articuloId] : [],
+          ),
+        ),
+      ),
+    ];
+    const articulos = ids.length
+      ? await this.prisma.articulo.findMany({
+          where: { id: { in: ids } },
+          include: { marca: true },
+        })
+      : [];
+    const porId = new Map(articulos.map((a) => [a.id, a]));
+    for (const id of ids) {
+      const articulo = porId.get(id);
+      if (!articulo) {
+        throw new BadRequestException(`El artículo ${id} no existe`);
+      }
+      if (articulo.fechaBaja) {
+        throw new BadRequestException(
+          `El artículo ${id} (${articulo.nombre}) está dado de baja`,
+        );
+      }
+      if (articulo.uso === UsoArticulo.VENTA) {
+        throw new BadRequestException(
+          `El artículo ${id} (${articulo.nombre}) es solo de venta: no se usa en el salón`,
+        );
+      }
+    }
+    return porId;
   }
 
   // "" in a text field clears it, like null.
