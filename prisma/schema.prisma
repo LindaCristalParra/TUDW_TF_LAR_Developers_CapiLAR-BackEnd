@@ -355,17 +355,22 @@ model Formula {
 model FormulaInsumo {
   id         Int           @id @default(autoincrement())
   formulaId  Int
-  producto   String        @db.VarChar(100)
-  marca      String?       @db.VarChar(100)
+  // Free text (up to 100), or the item's nombre (up to 150).
+  producto   String        @db.VarChar(150)
+  // Free text (up to 100), or the item's brand + line (100 + space + 100).
+  marca      String?       @db.VarChar(201)
   tono       String?       @db.VarChar(50)
   cantidad   Decimal?      @db.Decimal(10, 2)
   unidad     UnidadInsumo?
-  // Inventory item (F11). No foreign key until that table exists.
+  // Inventory item (F11), optional. With it, the back fills producto, marca, tono and unidad.
   articuloId Int?
 
-  formula Formula @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+  formula  Formula   @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+  // Restrict, not the SetNull Prisma uses by default on optional relations: items are only deactivated.
+  articulo Articulo? @relation(fields: [articuloId], references: [id], onDelete: Restrict)
 
   @@index([formulaId])
+  @@index([articuloId])
 }
 
 // F11 stock. AMBOS: used in the salon and also sold (e.g. ampoules), with one stock.
@@ -379,6 +384,8 @@ enum TipoProducto {
   TINTURA
   OXIDANTE
   DECOLORANTE
+  // Perm lotion.
+  PERMANENTE
   SHAMPOO
   ACONDICIONADOR
   MASCARA
@@ -440,6 +447,7 @@ model Articulo {
 
   remitoDetalles RemitoDetalle[]
   envaseEnUso    ArticuloUso?
+  formulaInsumos FormulaInsumo[]
 
   @@index([marcaId])
 }

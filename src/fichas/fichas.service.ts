@@ -13,6 +13,7 @@ import {
   MomentoFoto,
   Prisma,
   Rol,
+  UsoArticulo,
 } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { tramosDeDetalles } from '../turnos/agenda';
@@ -115,7 +116,7 @@ export class FichasService {
       data: {
         turnoDetalleId,
         ...this.limpiar(campos),
-        formulas: { create: this.formulasData(formulas ?? []) },
+        formulas: { create: await this.formulasData(formulas ?? []) },
       },
       include: fichaInclude,
     });
@@ -126,13 +127,18 @@ export class FichasService {
   async update(id: number, dto: FichaDto, actor: PublicUser) {
     const ficha = await this.findParaEditar(id, actor);
     const { formulas, ...campos } = dto;
+    const yaEnLaFicha = new Set(
+      ficha.formulas.flatMap((f) =>
+        f.insumos.flatMap((i) => (i.articuloId != null ? [i.articuloId] : [])),
+      ),
+    );
     const actualizada = await this.prisma.fichaTecnica.update({
       where: { id: ficha.id },
       data: {
         ...this.limpiar(campos),
         formulas: formulas && {
           deleteMany: {},
-          create: this.formulasData(formulas),
+          create: await this.formulasData(formulas, yaEnLaFicha),
         },
       },
       include: fichaInclude,
@@ -296,22 +302,87 @@ export class FichasService {
   }
 
   // The order of the list is the order they were applied in (orden 1, 2, 3...).
-  private formulasData(
+  // A supply with articuloId takes producto, marca, tono and unidad from the item.
+  private async formulasData(
     formulas: FormulaDto[],
-  ): Prisma.FormulaCreateWithoutFichaInput[] {
+    yaEnLaFicha = new Set<number>(),
+  ): Promise<Prisma.FormulaCreateWithoutFichaInput[]> {
+    const articulos = await this.articulosDeInsumos(formulas, yaEnLaFicha);
     return formulas.map((f, i) => ({
       descripcion: f.descripcion || null,
       oxidanteVolumen: f.oxidanteVolumen,
       tiempoPoseMin: f.tiempoPoseMin,
       orden: i + 1,
       insumos: {
-        create: (f.insumos ?? []).map((insumo) => ({
-          ...insumo,
-          marca: insumo.marca || null,
-          tono: insumo.tono || null,
-        })),
+        create: (f.insumos ?? []).map((insumo) => {
+          const articulo =
+            insumo.articuloId != null && articulos.get(insumo.articuloId);
+          if (!articulo) {
+            return {
+              producto: insumo.producto!,
+              marca: insumo.marca || null,
+              tono: insumo.tono || null,
+              cantidad: insumo.cantidad,
+              unidad: insumo.unidad,
+            };
+          }
+          const { razonSocial, linea } = articulo.marca;
+          return {
+            producto: articulo.nombre,
+            marca: linea ? `${razonSocial} ${linea}` : razonSocial,
+            tono: articulo.tonalidad,
+            cantidad: insumo.cantidad,
+            unidad: articulo.tipoPeso,
+            articuloId: articulo.id,
+          };
+        }),
       },
     }));
+  }
+
+  // Only active items used in the salon (SALON or AMBOS); anything else is a 400.
+  // One already saved in this record (yaEnLaFicha) can stay even if it was later deactivated or switched to
+  // VENTA, so the record can still be edited.
+  private async articulosDeInsumos(
+    formulas: FormulaDto[],
+    yaEnLaFicha: Set<number>,
+  ) {
+    const ids = [
+      ...new Set(
+        formulas.flatMap((f) =>
+          (f.insumos ?? []).flatMap((insumo) =>
+            insumo.articuloId != null ? [insumo.articuloId] : [],
+          ),
+        ),
+      ),
+    ];
+    const articulos = ids.length
+      ? await this.prisma.articulo.findMany({
+          where: { id: { in: ids } },
+          include: { marca: true },
+        })
+      : [];
+    const porId = new Map(articulos.map((a) => [a.id, a]));
+    for (const id of ids) {
+      const articulo = porId.get(id);
+      if (!articulo) {
+        throw new BadRequestException(`El artículo ${id} no existe`);
+      }
+      if (yaEnLaFicha.has(id)) {
+        continue;
+      }
+      if (articulo.fechaBaja) {
+        throw new BadRequestException(
+          `El artículo ${id} (${articulo.nombre}) está dado de baja`,
+        );
+      }
+      if (articulo.uso === UsoArticulo.VENTA) {
+        throw new BadRequestException(
+          `El artículo ${id} (${articulo.nombre}) es solo de venta: no se usa en el salón`,
+        );
+      }
+    }
+    return porId;
   }
 
   // "" in a text field clears it, like null.
