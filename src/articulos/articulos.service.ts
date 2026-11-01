@@ -74,9 +74,7 @@ export class ArticulosService {
   }
 
   async create(dto: CreateArticuloDto) {
-    await this.marcasService.findOrFail(dto.marcaId).catch(() => {
-      throw new BadRequestException('La marca no existe');
-    });
+    await this.assertMarcaExiste(dto.marcaId);
     const data = {
       ...dto,
       ...this.opcionales(dto),
@@ -105,9 +103,7 @@ export class ArticulosService {
   async update(id: number, dto: UpdateArticuloDto) {
     await this.findActivo(id);
     if (dto.marcaId !== undefined) {
-      await this.marcasService.findOrFail(dto.marcaId).catch(() => {
-        throw new BadRequestException('La marca no existe');
-      });
+      await this.assertMarcaExiste(dto.marcaId);
     }
     const data = {
       ...dto,
@@ -153,6 +149,19 @@ export class ArticulosService {
   }
 
   // --- helpers ---
+
+  // A missing brand is the client's mistake (400); any other error (e.g. the database is down)
+  // goes on as it is, so it still ends in a 500.
+  private async assertMarcaExiste(marcaId: number): Promise<void> {
+    try {
+      await this.marcasService.findOrFail(marcaId);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new BadRequestException('La marca no existe');
+      }
+      throw error;
+    }
+  }
 
   private async findOrFail(id: number): Promise<ArticuloConMarca> {
     const articulo = await this.prisma.articulo.findUnique({

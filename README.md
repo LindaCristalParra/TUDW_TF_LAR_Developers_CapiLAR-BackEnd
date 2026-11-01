@@ -79,7 +79,7 @@ Once the Prisma schema is set up, apply the migrations with:
 npx prisma migrate dev
 ```
 
-Create the first admin account (uses `ADMIN_EMAIL` and `ADMIN_PASSWORD` from `.env`; skipped if that email already exists or `ADMIN_EMAIL` is not set) and some stock to try the app (brands and items from real price lists; skipped if there are brands already):
+Create the first admin account (uses `ADMIN_EMAIL` and `ADMIN_PASSWORD` from `.env`; skipped if that email already exists; without `ADMIN_EMAIL` it only goes on, with a warning, when the database already has an admin, and fails otherwise) and some stock to try the app (brands and items from real price lists; skipped if there are brands already):
 
 ```bash
 npx prisma db seed

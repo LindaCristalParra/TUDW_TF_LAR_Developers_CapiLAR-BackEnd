@@ -25,9 +25,20 @@ function requireEnv(name: string): string {
 }
 
 async function seedAdmin(prisma: PrismaClient) {
-  // Optional, so a local database with its admin already made can still get the stock.
+  // Without ADMIN_EMAIL: fine only if the database already has an active admin (e.g. a local one
+  // made earlier). Otherwise it fails loudly, so a misconfigured deploy never ends up adminless.
   if (!process.env.ADMIN_EMAIL?.trim()) {
-    console.log('Seed: ADMIN_EMAIL is not set, admin skipped.');
+    const admins = await prisma.usuario.count({
+      where: { rol: Rol.ADMIN, fechaBaja: null },
+    });
+    if (admins === 0) {
+      throw new Error(
+        'ADMIN_EMAIL is not defined in .env and the database has no admin',
+      );
+    }
+    console.warn(
+      `Seed: WARNING ADMIN_EMAIL is not set; the database already has ${admins} admin(s), admin skipped.`,
+    );
     return;
   }
   const email = requireEnv('ADMIN_EMAIL').toLowerCase();
@@ -310,25 +321,38 @@ const STOCK: {
 ];
 
 // Only on an empty catalog: it never duplicates or touches what the salon loaded.
+// All or nothing: if one brand fails, none stays, so the next run (which skips a non-empty
+// catalog) can load it whole.
 async function seedStock(prisma: PrismaClient) {
   if ((await prisma.marca.count()) > 0) {
     console.log('Seed: brands already loaded, stock skipped.');
     return;
   }
-  let articulos = 0;
-  for (const { razonSocial, linea, articulos: lista } of STOCK) {
-    await prisma.marca.create({
-      data: {
-        razonSocial,
-        linea,
-        articulos: {
-          create: lista.map((articulo) => ({ ...articulo, qr: nuevoQr() })),
-        },
-      },
-    });
-    articulos += lista.length;
+  // Without repeats among themselves; an empty catalog has no items to clash with.
+  const total = STOCK.reduce((n, marca) => n + marca.articulos.length, 0);
+  const qrs = new Set<string>();
+  while (qrs.size < total) {
+    qrs.add(nuevoQr());
   }
-  console.log(`Seed: ${STOCK.length} brands and ${articulos} items created.`);
+  const libres = [...qrs];
+
+  await prisma.$transaction(async (tx) => {
+    for (const { razonSocial, linea, articulos } of STOCK) {
+      await tx.marca.create({
+        data: {
+          razonSocial,
+          linea,
+          articulos: {
+            create: articulos.map((articulo) => ({
+              ...articulo,
+              qr: libres.pop()!,
+            })),
+          },
+        },
+      });
+    }
+  });
+  console.log(`Seed: ${STOCK.length} brands and ${total} items created.`);
 }
 
 async function main() {
