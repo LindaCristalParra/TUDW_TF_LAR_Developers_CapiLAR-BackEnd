@@ -167,7 +167,7 @@ export class ArticulosService {
       fechaVencimiento: this.fechaVencimiento(dto.fechaVencimiento),
     };
     try {
-      if (dto.tipoPeso === undefined) {
+      if (dto.tipoPeso === undefined && dto.pesoInicial === undefined) {
         const articulo = await this.prisma.articulo.update({
           where: { id },
           data,
@@ -176,13 +176,23 @@ export class ArticulosService {
         return this.formatear(articulo);
       }
       const articulo = await this.prisma.$transaction(async (tx) => {
-        // The update locks the item's row first, so opening a container (which locks it too) can't
-        // slip in between and leave one with the old unit.
+        // The update locks the item's row first, so opening or updating the container (which lock
+        // it too) can't slip in between with the old unit or content.
         await tx.articulo.update({ where: { id }, data });
         // In another unit pesoActual means nothing: the open container is finished (decided 01/11).
-        await tx.articuloUso.deleteMany({
-          where: { articuloId: id, tipoPeso: { not: dto.tipoPeso } },
-        });
+        if (dto.tipoPeso !== undefined) {
+          await tx.articuloUso.deleteMany({
+            where: { articuloId: id, tipoPeso: { not: dto.tipoPeso } },
+          });
+        }
+        // A smaller container can't hold more than it did: what's left is cut down to the new
+        // content (decided 01/11; most likely a typo fixed while the container stays in use).
+        if (dto.pesoInicial !== undefined) {
+          await tx.articuloUso.updateMany({
+            where: { articuloId: id, pesoActual: { gt: dto.pesoInicial } },
+            data: { pesoActual: dto.pesoInicial },
+          });
+        }
         return tx.articulo.findUniqueOrThrow({
           where: { id },
           include: articuloInclude,

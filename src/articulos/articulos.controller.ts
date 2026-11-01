@@ -97,8 +97,9 @@ export class ArticulosController {
    * movimientos). Se valida cómo queda el artículo: uso VENTA o AMBOS sin
    * `precioVenta` es 400; pasar a SALON borra el precio de venta (mandarlo con
    * SALON es 400). Cambiar `tipoPeso` termina el envase abierto (en otra unidad
-   * lo que quedaba no sirve). 404 si no existe o está dado de baja; 400 si la
-   * marca no existe.
+   * lo que quedaba no sirve); bajar `pesoInicial` recorta lo que queda en el
+   * envase abierto al contenido nuevo. 404 si no existe o está dado de baja;
+   * 400 si la marca no existe.
    */
   @Patch(':id')
   @Roles(Rol.ADMIN)
