@@ -19,8 +19,10 @@ import { CreateArticuloDto } from './dto/create-articulo.dto';
 import { ListArticulosQueryDto } from './dto/list-articulos-query.dto';
 import { UpdateArticuloDto } from './dto/update-articulo.dto';
 
+// envaseEnUso is null when no container is open.
 export const articuloInclude = {
   marca: true,
+  envaseEnUso: { select: { pesoActual: true, tipoPeso: true } },
 } satisfies Prisma.ArticuloInclude;
 
 export type ArticuloConMarca = Prisma.ArticuloGetPayload<{
@@ -165,10 +167,26 @@ export class ArticulosService {
       fechaVencimiento: this.fechaVencimiento(dto.fechaVencimiento),
     };
     try {
-      const articulo = await this.prisma.articulo.update({
-        where: { id },
-        data,
-        include: articuloInclude,
+      if (dto.tipoPeso === undefined) {
+        const articulo = await this.prisma.articulo.update({
+          where: { id },
+          data,
+          include: articuloInclude,
+        });
+        return this.formatear(articulo);
+      }
+      const articulo = await this.prisma.$transaction(async (tx) => {
+        // The update locks the item's row first, so opening a container (which locks it too) can't
+        // slip in between and leave one with the old unit.
+        await tx.articulo.update({ where: { id }, data });
+        // In another unit pesoActual means nothing: the open container is finished (decided 01/11).
+        await tx.articuloUso.deleteMany({
+          where: { articuloId: id, tipoPeso: { not: dto.tipoPeso } },
+        });
+        return tx.articulo.findUniqueOrThrow({
+          where: { id },
+          include: articuloInclude,
+        });
       });
       return this.formatear(articulo);
     } catch (error) {
