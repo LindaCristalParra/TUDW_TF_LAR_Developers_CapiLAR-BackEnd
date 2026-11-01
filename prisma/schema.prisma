@@ -58,6 +58,7 @@ model Usuario {
 
   notificaciones Notificacion[]
   sesiones       Sesion[]
+  remitos        Remito[]
 }
 
 // One per login (device), so the web and the app can be open at the same time.
@@ -437,7 +438,60 @@ model Articulo {
 
   marca Marca @relation(fields: [marcaId], references: [id])
 
+  remitoDetalles RemitoDetalle[]
+
   @@index([marcaId])
+}
+
+// COMPRA: a purchase from a supplier (F13). INGRESO/EGRESO/AJUSTE: manual movements, without supplier.
+enum TipoRemito {
+  COMPRA
+  INGRESO
+  EGRESO
+  AJUSTE
+}
+
+// Manual movements are born APLICADO; PENDIENTE and ANULADO are for purchases (F13).
+enum EstadoRemito {
+  PENDIENTE
+  APLICADO
+  ANULADO
+}
+
+// A stock movement (the DER has no movements table): its RemitoDetalle rows are each item's history.
+model Remito {
+  id             Int          @id @default(autoincrement())
+  fecha          DateTime     @default(now())
+  tipo           TipoRemito
+  estado         EstadoRemito
+  numComprobante String?      @db.VarChar(30)
+  // The supplier of a COMPRA. No relation yet: the Proveedor table comes with F13.
+  proveedorId    Int?
+  // Who registered it (usuarioId instead of the DER's profesionalId: an ADMIN may not be a professional).
+  usuarioId      Int
+  // Required for EGRESO and AJUSTE (checked in the service).
+  motivo         String?      @db.VarChar(255)
+
+  usuario  Usuario         @relation(fields: [usuarioId], references: [id])
+  detalles RemitoDetalle[]
+
+  @@index([usuarioId])
+}
+
+model RemitoDetalle {
+  id            Int      @id @default(autoincrement())
+  remitoId      Int
+  articuloId    Int
+  // Containers, signed (an EGRESO is negative). In an AJUSTE it is the difference with the counted stock.
+  cantidad      Decimal  @db.Decimal(10, 3)
+  // What one container cost in a COMPRA (F13); it updates the item's precioCosto.
+  costoUnitario Decimal? @db.Decimal(10, 2)
+
+  remito   Remito   @relation(fields: [remitoId], references: [id])
+  articulo Articulo @relation(fields: [articuloId], references: [id])
+
+  @@index([remitoId])
+  @@index([articuloId])
 }
 
 enum MedioNotificacion {

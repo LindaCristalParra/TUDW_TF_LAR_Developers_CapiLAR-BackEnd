@@ -7,14 +7,17 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
+import type { PublicUser } from '../users/users.service';
 import { ArticulosService } from './articulos.service';
 import { CreateArticuloDto } from './dto/create-articulo.dto';
 import { ListArticulosQueryDto } from './dto/list-articulos-query.dto';
@@ -60,14 +63,15 @@ export class ArticulosController {
    * Crear un artículo (solo ADMIN)
    *
    * @remarks El back genera el texto del QR (`qr`, ej. "ART-7K2M9QXP"); el front
-   * arma la imagen. `stock` es el stock inicial: después cambia con los
-   * movimientos. `precioVenta` es obligatorio para uso VENTA o AMBOS y no va en
-   * SALON. 400 si la marca no existe.
+   * arma la imagen. `stock` es el stock inicial: si es mayor a 0 queda como
+   * primer movimiento (INGRESO "Stock inicial" de quien lo crea); después cambia
+   * con los movimientos. `precioVenta` es obligatorio para uso VENTA o AMBOS y no
+   * va en SALON. 400 si la marca no existe.
    */
   @Post()
   @Roles(Rol.ADMIN)
-  create(@Body() dto: CreateArticuloDto) {
-    return this.articulosService.create(dto);
+  create(@Body() dto: CreateArticuloDto, @Req() req: Request) {
+    return this.articulosService.create(dto, (req.user as PublicUser).id);
   }
 
   /**
