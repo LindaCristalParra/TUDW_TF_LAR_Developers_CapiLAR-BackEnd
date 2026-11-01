@@ -306,6 +306,8 @@ model FichaTecnica {
   turnoDetalle TurnoDetalle @relation(fields: [turnoDetalleId], references: [id])
   formulas     Formula[]
   fotos        FotoFicha[]
+  // Its CONSUMO movements: the stock it used, and the adjustments when it's edited once closed.
+  remitos      Remito[]
 
   @@index([turnoDetalleId])
 }
@@ -353,17 +355,19 @@ model Formula {
 }
 
 model FormulaInsumo {
-  id         Int           @id @default(autoincrement())
-  formulaId  Int
+  id            Int           @id @default(autoincrement())
+  formulaId     Int
   // Free text (up to 100), or the item's nombre (up to 150).
-  producto   String        @db.VarChar(150)
+  producto      String        @db.VarChar(150)
   // Free text (up to 100), or the item's brand + line (100 + space + 100).
-  marca      String?       @db.VarChar(201)
-  tono       String?       @db.VarChar(50)
-  cantidad   Decimal?      @db.Decimal(10, 2)
-  unidad     UnidadInsumo?
+  marca         String?       @db.VarChar(201)
+  tono          String?       @db.VarChar(50)
+  cantidad      Decimal?      @db.Decimal(10, 2)
+  unidad        UnidadInsumo?
   // Inventory item (F11), optional. With it, the back fills producto, marca, tono and unidad.
-  articuloId Int?
+  articuloId    Int?
+  // precioCosto / pesoInicial × cantidad, when the turno is completed. null for free text or an open record.
+  costoSubtotal Decimal?      @db.Decimal(10, 2)
 
   formula  Formula   @relation(fields: [formulaId], references: [id], onDelete: Cascade)
   // Restrict, not the SetNull Prisma uses by default on optional relations: items are only deactivated.
@@ -466,11 +470,14 @@ model ArticuloUso {
 }
 
 // COMPRA: a purchase from a supplier (F13). INGRESO/EGRESO/AJUSTE: manual movements, without supplier.
+// CONSUMO: what a technical record used when its turno was completed (and its adjustments if it's
+// edited once closed); never sent by the front.
 enum TipoRemito {
   COMPRA
   INGRESO
   EGRESO
   AJUSTE
+  CONSUMO
 }
 
 // Manual movements are born APLICADO; PENDIENTE and ANULADO are for purchases (F13).
@@ -493,11 +500,16 @@ model Remito {
   usuarioId      Int
   // Required for EGRESO and AJUSTE (checked in the service).
   motivo         String?      @db.VarChar(255)
+  // CONSUMO: the record it belongs to (outside the DER). null for the other types.
+  fichaId        Int?
 
   usuario  Usuario         @relation(fields: [usuarioId], references: [id])
+  // Restrict, not the SetNull Prisma uses by default on optional relations: records are only deactivated.
+  ficha    FichaTecnica?   @relation(fields: [fichaId], references: [id], onDelete: Restrict)
   detalles RemitoDetalle[]
 
   @@index([usuarioId])
+  @@index([fichaId])
 }
 
 model RemitoDetalle {
