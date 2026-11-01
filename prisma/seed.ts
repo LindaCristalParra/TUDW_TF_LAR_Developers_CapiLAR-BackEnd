@@ -101,8 +101,73 @@ function precioVentaDePrueba(articulo: ArticuloSeed): number | null {
     : Math.round((articulo.precioCosto * 1.6) / 100) * 100;
 }
 
-// From the Meraki price lists (August 2026): list price = what the salon pays (precioCosto).
-// The salon-size colour products aren't in those lists: they are marked "(prueba)".
+// A 60 g colour tube used in the salon. The minimum is 0: a tone is only "low" once it runs out.
+function tintura(
+  tono: string,
+  nombre: string,
+  stock: number,
+  precioCosto = 7440,
+): ArticuloSeed {
+  return {
+    nombre: nombre.startsWith('Corrector')
+      ? nombre
+      : `Tintura ${tono} ${nombre}`,
+    uso: SALON,
+    tipoProducto: 'TINTURA',
+    precioCosto,
+    pesoInicial: 60,
+    tipoPeso: G,
+    tipoDeposito: 'SALON',
+    stock,
+    stockMinAlert: 0,
+    tonalidad: tono,
+  };
+}
+
+// Question Professional tubes from the Ruben Morado purchase: [tone, name, quantity, cost?].
+// The 5.3 came twice (7440 and 8400): one item with both tubes and the latest price.
+const TINTURAS_QUESTION: [string, string, number, number?][] = [
+  ['1', 'Negro', 1],
+  ['5.00', 'Castaño Claro Profundo', 2],
+  ['5.3', 'Castaño Claro Dorado', 2, 8400],
+  ['5.53', 'Castaño Claro Chocolate', 1],
+  ['5ME', 'Castaño Claro Marrón Elemental', 1],
+  ['5MK', 'Castaño Claro Moka Mousse', 1],
+  ['6.23', 'Rubio Oscuro Marrón Profundo', 2],
+  ['6.3', 'Rubio Oscuro Dorado', 1],
+  ['6.31', 'Rubio Oscuro Dorado Beige', 2],
+  ['6.45', 'Rubio Oscuro Cobrizo Caoba', 1],
+  ['6.52', 'Rubio Oscuro Tabaco', 2],
+  ['6.53', 'Rubio Oscuro Chocolate', 1],
+  ['6.6', 'Rubio Oscuro Caoba', 1],
+  ['6NC', 'Rubio Oscuro Cálido', 1],
+  ['7.00', 'Rubio Profundo', 2],
+  ['7.17', 'Hielo Plomo', 1],
+  ['7.23', 'Rubio Marrón Profundo', 2],
+  ['7.3', 'Rubio Dorado', 1],
+  ['7.32', 'Rubio Dorado Miel', 1],
+  ['7.40', 'Rubio Cobrizo Intenso', 1],
+  ['7.64', 'Rubio Rojizo Cobrizo', 2],
+  ['7AV', 'Rubio Avellana', 2],
+  ['7CM', 'Rubio Caramel', 1],
+  ['7ME', 'Rubio Marrón Elemental', 1],
+  ['8.2', 'Rubio Claro Malva', 1],
+  ['8.31', 'Rubio Claro Dorado Beige', 1],
+  ['8.32', 'Rubio Claro Dorado Miel', 1],
+  ['8.34', 'Rubio Claro Dorado Cobrizo', 1],
+  ['8.43v', 'Rubio Claro Cobrizo Dorado Vibrant', 1],
+  ['8.52', 'Rubio Claro Tabaco', 2],
+  ['8AV', 'Rubio Claro Avellana', 2],
+  ['8NC', 'Rubio Claro Cálido', 2],
+  ['9.00', 'Rubio Muy Claro Profundo', 1],
+  ['9.10', 'Hielo Perla', 1],
+  ['9.13', 'Rubio Muy Claro Beige', 1],
+  ['9.3', 'Rubio Muy Claro Dorado', 1],
+  ['10.10', 'Rubio Extra Claro Perla Metalizado', 1, 8400],
+  ['10.21', 'Hielo Lila', 1],
+];
+
+// Care and styling from the Meraki price lists (August 2026): list price = what the salon pays.
 const STOCK: {
   razonSocial: string;
   linea: string;
@@ -242,46 +307,6 @@ const STOCK: {
     ],
   },
   {
-    razonSocial: 'Fidelité',
-    linea: 'Coloración',
-    articulos: [
-      {
-        nombre: 'Tintura 7.1 Rubio Medio Ceniza (prueba)',
-        uso: SALON,
-        tipoProducto: 'TINTURA',
-        precioCosto: 5000,
-        pesoInicial: 60,
-        tipoPeso: G,
-        tipoDeposito: 'SALON',
-        stock: 8,
-        stockMinAlert: 3,
-        tonalidad: '7.1',
-      },
-      {
-        nombre: 'Oxidante 20 vol 1 L (prueba)',
-        uso: SALON,
-        tipoProducto: 'OXIDANTE',
-        precioCosto: 9000,
-        pesoInicial: 1000,
-        tipoPeso: ML,
-        tipoDeposito: 'DEPOSITO',
-        stock: 2.5,
-        stockMinAlert: 1,
-      },
-      {
-        nombre: 'Decolorante en polvo 500 g (prueba)',
-        uso: SALON,
-        tipoProducto: 'DECOLORANTE',
-        precioCosto: 15000,
-        pesoInicial: 500,
-        tipoPeso: G,
-        tipoDeposito: 'DEPOSITO',
-        stock: 1,
-        stockMinAlert: 1,
-      },
-    ],
-  },
-  {
     razonSocial: 'Angelis',
     linea: 'Keratin Repair',
     articulos: [
@@ -325,6 +350,93 @@ const STOCK: {
         stockMinAlert: 1,
       },
     ],
+  },
+  // Colour, from a purchase to Ruben Morado (20/10/2026): the bought quantity is the stock.
+  {
+    razonSocial: 'Question Professional',
+    linea: 'Coloración',
+    articulos: [
+      ...TINTURAS_QUESTION.map(([tono, nombre, stock, precioCosto]) =>
+        tintura(tono, nombre, stock, precioCosto),
+      ),
+      tintura('Mix Rojo', 'Corrector Mix Rojo', 1),
+      {
+        nombre: 'Oxidante en crema 20 vol',
+        uso: SALON,
+        tipoProducto: 'OXIDANTE',
+        precioCosto: 18500,
+        pesoInicial: 900,
+        tipoPeso: ML,
+        tipoDeposito: 'DEPOSITO',
+        stock: 1,
+        stockMinAlert: 1,
+        tonalidad: '20 vol',
+      },
+      {
+        nombre: 'Oxidante en crema 30 vol',
+        uso: SALON,
+        tipoProducto: 'OXIDANTE',
+        precioCosto: 18500,
+        pesoInicial: 900,
+        tipoPeso: ML,
+        tipoDeposito: 'DEPOSITO',
+        stock: 1,
+        stockMinAlert: 1,
+        tonalidad: '30 vol',
+      },
+    ],
+  },
+  {
+    razonSocial: 'Question Professional',
+    linea: 'Lumiplex',
+    articulos: [
+      tintura('9.21', 'Rubio Muy Claro Malva Ceniza', 1, 8400),
+      {
+        nombre: 'Oxigenada Lumiplex 6 vol',
+        uso: SALON,
+        tipoProducto: 'OXIDANTE',
+        precioCosto: 24000,
+        pesoInicial: 1000,
+        tipoPeso: ML,
+        tipoDeposito: 'DEPOSITO',
+        stock: 1,
+        stockMinAlert: 1,
+        tonalidad: '6 vol',
+      },
+    ],
+  },
+  {
+    razonSocial: 'Question Professional',
+    linea: 'Styling',
+    articulos: [
+      {
+        nombre: 'Crema Curl Cream Style',
+        uso: AMBOS,
+        tipoProducto: 'PEINADO',
+        precioCosto: 17000,
+        pesoInicial: 235,
+        tipoPeso: ML,
+        tipoDeposito: 'VITRINA',
+        stock: 1,
+        stockMinAlert: 1,
+      },
+      {
+        nombre: 'Termic Protect',
+        uso: AMBOS,
+        tipoProducto: 'PROTECTOR_TERMICO',
+        precioCosto: 22000,
+        pesoInicial: 240,
+        tipoPeso: ML,
+        tipoDeposito: 'VITRINA',
+        stock: 3,
+        stockMinAlert: 1,
+      },
+    ],
+  },
+  {
+    razonSocial: 'Livesolut',
+    linea: 'Coloración',
+    articulos: [tintura('7.2', 'Rubio Malva', 1, 4800)],
   },
 ];
 
