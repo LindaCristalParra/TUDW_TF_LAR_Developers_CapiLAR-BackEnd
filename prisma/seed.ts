@@ -460,23 +460,28 @@ async function seedStock(prisma: PrismaClient) {
   }
   const libres = [...qrs];
 
-  await prisma.$transaction(async (tx) => {
-    for (const { razonSocial, linea, articulos } of STOCK) {
-      await tx.marca.create({
-        data: {
-          razonSocial,
-          linea,
-          articulos: {
-            create: articulos.map((articulo) => ({
-              ...articulo,
-              precioVenta: precioVentaDePrueba(articulo),
-              qr: libres.pop()!,
-            })),
+  // ~70 inserts: Prisma's default limit (5 s) can run out against a remote database, and then
+  // nothing is loaded. One minute is plenty; it's a one-off script.
+  await prisma.$transaction(
+    async (tx) => {
+      for (const { razonSocial, linea, articulos } of STOCK) {
+        await tx.marca.create({
+          data: {
+            razonSocial,
+            linea,
+            articulos: {
+              create: articulos.map((articulo) => ({
+                ...articulo,
+                precioVenta: precioVentaDePrueba(articulo),
+                qr: libres.pop()!,
+              })),
+            },
           },
-        },
-      });
-    }
-  });
+        });
+      }
+    },
+    { maxWait: 10_000, timeout: 60_000 },
+  );
   console.log(`Seed: ${STOCK.length} brands and ${total} items created.`);
 }
 
