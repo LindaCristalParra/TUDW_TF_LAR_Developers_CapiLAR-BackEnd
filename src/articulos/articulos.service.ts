@@ -14,11 +14,11 @@ import { CreateArticuloDto } from './dto/create-articulo.dto';
 import { ListArticulosQueryDto } from './dto/list-articulos-query.dto';
 import { UpdateArticuloDto } from './dto/update-articulo.dto';
 
-const articuloInclude = {
+export const articuloInclude = {
   marca: true,
 } satisfies Prisma.ArticuloInclude;
 
-type ArticuloConMarca = Prisma.ArticuloGetPayload<{
+export type ArticuloConMarca = Prisma.ArticuloGetPayload<{
   include: typeof articuloInclude;
 }>;
 
@@ -248,8 +248,8 @@ export class ArticulosService {
 
   // Decimals travel as text, like the other prices of the API (e.g. stock "3.500").
   // The same shape for every role, precioCosto included: professionals may see cost prices
-  // (salon decision, 31/10), so it is not filtered by role on purpose.
-  private formatear(articulo: ArticuloConMarca) {
+  // (salon decision, 31/10), so it is not filtered by role on purpose. Movements answer with it too.
+  formatear(articulo: ArticuloConMarca) {
     const { fechaVencimiento } = articulo;
     return {
       ...articulo,
