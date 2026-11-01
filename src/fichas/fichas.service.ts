@@ -341,7 +341,8 @@ export class FichasService {
   }
 
   // Only active items used in the salon (SALON or AMBOS); anything else is a 400.
-  // One deactivated after it was saved in this record (yaEnLaFicha) can stay, so the record can still be edited.
+  // One already saved in this record (yaEnLaFicha) can stay even if it was later deactivated or switched to
+  // VENTA, so the record can still be edited.
   private async articulosDeInsumos(
     formulas: FormulaDto[],
     yaEnLaFicha: Set<number>,
@@ -367,7 +368,10 @@ export class FichasService {
       if (!articulo) {
         throw new BadRequestException(`El artículo ${id} no existe`);
       }
-      if (articulo.fechaBaja && !yaEnLaFicha.has(id)) {
+      if (yaEnLaFicha.has(id)) {
+        continue;
+      }
+      if (articulo.fechaBaja) {
         throw new BadRequestException(
           `El artículo ${id} (${articulo.nombre}) está dado de baja`,
         );

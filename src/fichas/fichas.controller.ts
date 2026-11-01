@@ -161,8 +161,9 @@ export class FichasController {
    * @remarks Solo mientras está abierta: se cierra cuando el turno se completa.
    * `null` (o `""` en los textos) borra un campo. `formulas` enviado reemplaza
    * todas las fórmulas; los insumos con `articuloId` se validan de nuevo como
-   * en el alta, salvo que un artículo que ya estaba en esta ficha y se dio de
-   * baja después se puede conservar (agregarlo nuevo sigue siendo 400).
+   * en el alta, salvo que un artículo que ya estaba en esta ficha se puede
+   * conservar aunque después se haya dado de baja o pasado a VENTA (agregarlo
+   * nuevo, o en otra ficha, sigue siendo 400).
    */
   @Patch('fichas/:id')
   update(
