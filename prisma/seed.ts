@@ -440,10 +440,14 @@ const STOCK: {
   },
 ];
 
-// Only on an empty catalog: it never duplicates or touches what the salon loaded.
-// All or nothing: if one brand fails, none stays, so the next run (which skips a non-empty
-// catalog) can load it whole.
+// Test data (made-up sale prices included): only with SEED_STOCK=true, so a real deploy never
+// gets it by accident. Only on an empty catalog: it never duplicates or touches what the salon
+// loaded. All or nothing: if one brand fails, none stays, so the next run can load it whole.
 async function seedStock(prisma: PrismaClient) {
+  if (process.env.SEED_STOCK?.trim() !== 'true') {
+    console.log("Seed: SEED_STOCK is not 'true', test stock skipped.");
+    return;
+  }
   if ((await prisma.marca.count()) > 0) {
     console.log('Seed: brands already loaded, stock skipped.');
     return;
