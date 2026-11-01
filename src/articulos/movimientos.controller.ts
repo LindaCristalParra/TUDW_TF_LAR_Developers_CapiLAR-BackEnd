@@ -1,4 +1,12 @@
-import { Body, Controller, Param, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -37,5 +45,19 @@ export class MovimientosController {
     @Req() req: Request,
   ) {
     return this.movimientosService.create(id, dto, (req.user as PublicUser).id);
+  }
+
+  /**
+   * Historial de stock de un artículo (ADMIN o PROFESIONAL)
+   *
+   * @remarks Del más nuevo al más viejo, con el mismo formato que `movimiento`
+   * del POST: `cantidad` con signo (lo que cambió el stock), `tipo`, `motivo`,
+   * `numComprobante` y quién lo registró (`usuario`). El stock inicial del alta
+   * es un INGRESO "Stock inicial". También de un artículo dado de baja; 404 si
+   * no existe.
+   */
+  @Get(':id/movimientos')
+  findDeArticulo(@Param('id', ParseIdPipe) id: number) {
+    return this.movimientosService.findDeArticulo(id);
   }
 }

@@ -57,6 +57,17 @@ export class MovimientosService {
     };
   }
 
+  // The item's history, newest first. Also for an inactive item (404 only if it doesn't exist).
+  async findDeArticulo(articuloId: number) {
+    await this.articulosService.findOne(articuloId);
+    const movimientos = await this.prisma.remitoDetalle.findMany({
+      where: { articuloId },
+      orderBy: [{ remito: { fecha: 'desc' } }, { id: 'desc' }],
+      include: movimientoInclude,
+    });
+    return movimientos.map((m) => this.formatear(m));
+  }
+
   // --- helpers ---
 
   private async aplicar(
