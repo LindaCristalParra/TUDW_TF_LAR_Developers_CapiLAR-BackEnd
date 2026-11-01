@@ -160,7 +160,8 @@ export class FichasController {
    *
    * @remarks También después de cerrada (cuando el turno se completa), desde el
    * historial de la clienta: ella ve los cambios en `GET /fichas/mias` y
-   * `actualizadaEn` muestra la última edición. Otro profesional: 403.
+   * `actualizadaEn` muestra la última edición (incluye subir o quitar fotos).
+   * Otro profesional: 403.
    * `null` (o `""` en los textos) borra un campo. `formulas` enviado reemplaza
    * todas las fórmulas; los insumos con `articuloId` se validan de nuevo como
    * en el alta, salvo que un artículo que ya estaba en esta ficha se puede
