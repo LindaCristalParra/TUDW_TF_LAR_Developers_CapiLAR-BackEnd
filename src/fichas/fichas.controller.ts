@@ -80,7 +80,8 @@ export class FichasController {
    *
    * @remarks Las fichas de sus turnos completados, de la más nueva a la más
    * vieja: fecha, servicio, profesional, `indicacionesCliente` y las fotos de
-   * antes y después (`fotos[]`, la imagen en `GET /fichas/:id/fotos/:fotoId`).
+   * antes y después (`fotos[]`, la imagen en `GET /fichas/:id/fotos/:fotoId`)
+   * y `actualizadaEn` (última edición: el profesional puede editarla cerrada).
    * Sin el diagnóstico, las fórmulas ni las observaciones internas.
    */
   @Get('fichas/mias')

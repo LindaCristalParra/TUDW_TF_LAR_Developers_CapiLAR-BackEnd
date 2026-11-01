@@ -482,6 +482,8 @@ export class FichasService {
       profesional: `${profesional.usuario.nombre} ${profesional.usuario.apellido}`,
       indicacionesCliente: ficha.indicacionesCliente,
       fotos: this.formatearFotos(ficha.fotos),
+      // Its professional can edit it once closed (PWA-255): the date of the last change.
+      actualizadaEn: ficha.actualizadaEn,
     };
   }
 
