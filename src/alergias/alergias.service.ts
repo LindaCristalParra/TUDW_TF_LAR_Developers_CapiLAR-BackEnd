@@ -4,10 +4,15 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { esErrorPrisma } from '../common/errores-prisma';
 import { Alergia } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAlergiaDto } from './dto/create-alergia.dto';
 import { UpdateAlergiaDto } from './dto/update-alergia.dto';
+
+function nombreRepetido(): ConflictException {
+  return new ConflictException('Ya existe una alergia con ese nombre');
+}
 
 @Injectable()
 export class AlergiasService {
@@ -22,9 +27,14 @@ export class AlergiasService {
 
   async create(dto: CreateAlergiaDto): Promise<Alergia> {
     await this.assertNombreLibre(dto.nombre);
-    return this.prisma.alergia.create({
-      data: { ...dto, descripcion: dto.descripcion || null },
-    });
+    try {
+      return await this.prisma.alergia.create({
+        data: { ...dto, descripcion: dto.descripcion || null },
+      });
+    } catch (error) {
+      // Someone saved the same name between the check and the insert.
+      throw esErrorPrisma(error, 'P2002') ? nombreRepetido() : error;
+    }
   }
 
   async update(id: number, dto: UpdateAlergiaDto): Promise<Alergia> {
@@ -36,7 +46,12 @@ export class AlergiasService {
       dto.descripcion === undefined
         ? dto
         : { ...dto, descripcion: dto.descripcion || null };
-    return this.prisma.alergia.update({ where: { id }, data });
+    try {
+      return await this.prisma.alergia.update({ where: { id }, data });
+    } catch (error) {
+      // Someone saved the same name between the check and the update.
+      throw esErrorPrisma(error, 'P2002') ? nombreRepetido() : error;
+    }
   }
 
   // Logical delete: it is no longer offered, but clients who have it keep showing it.
@@ -89,11 +104,12 @@ export class AlergiasService {
     return unicos;
   }
 
-  // The collation is case-insensitive, so "látex" and "Látex" are the same name.
+  // The collation is case-insensitive, so "látex" and "Látex" are the same name. The unique
+  // index backs it up when two requests race (P2002, caught in create and update).
   private async assertNombreLibre(nombre: string, id?: number): Promise<void> {
     const otra = await this.prisma.alergia.findUnique({ where: { nombre } });
     if (otra && otra.id !== id) {
-      throw new ConflictException('Ya existe una alergia con ese nombre');
+      throw nombreRepetido();
     }
   }
 
