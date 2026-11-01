@@ -8,6 +8,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { Trim } from '../../auth/dto/trim.decorator';
 import {
@@ -57,6 +58,10 @@ export class CreateServicioDto {
    * Precio en pesos.
    * @example 15000
    */
+  // The largest value of the DECIMAL(10,2) column; beyond it MySQL fails with a 500.
+  @Max(99_999_999.99, {
+    message: 'El precio no puede superar los $99.999.999,99',
+  })
   @Min(0, { message: 'El precio no puede ser negativo' })
   @IsNumber(
     { maxDecimalPlaces: 2 },
@@ -71,6 +76,7 @@ export class CreateServicioDto {
    * @example false
    */
   @IsBoolean({ message: 'requiereEvaluacion debe ser true o false' })
-  @IsOptional()
+  // Optional but not nullable (NOT NULL column): unlike @IsOptional(), null is validated.
+  @ValidateIf((_, value) => value !== undefined)
   requiereEvaluacion?: boolean;
 }
