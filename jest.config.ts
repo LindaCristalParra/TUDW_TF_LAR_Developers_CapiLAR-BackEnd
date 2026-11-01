@@ -22,7 +22,11 @@ const config: Config = {
       { tsconfig: { ...tsconfig?.compilerOptions, rootDir: '.' } },
     ],
   },
-  moduleNameMapper: pathsToModuleNameMapper(paths, { prefix: '<rootDir>/' }),
+  moduleNameMapper: {
+    // The generated Prisma client imports its own files as './x.js'; Jest has to find './x.ts'.
+    '^([.]{1,2}/.*)[.]js$': '$1',
+    ...pathsToModuleNameMapper(paths, { prefix: '<rootDir>/' }),
+  },
   collectCoverageFrom: [
     'src/**/*.(t|j)s',
     'libs/**/*.(t|j)s',
