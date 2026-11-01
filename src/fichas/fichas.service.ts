@@ -140,9 +140,14 @@ export class FichasService {
     return this.formatear(actualizada);
   }
 
-  // Logical delete, only while it's open.
+  // Logical delete, only while it's open: a closed one is part of the client's history.
   async deactivate(id: number, actor: PublicUser): Promise<void> {
     const ficha = await this.findParaEditar(id, actor);
+    if (ficha.cerradaEn) {
+      throw new BadRequestException(
+        'La ficha está cerrada: el turno ya se completó',
+      );
+    }
     await this.prisma.fichaTecnica.update({
       where: { id: ficha.id },
       data: { fechaBaja: new Date() },
@@ -207,8 +212,13 @@ export class FichasService {
     }
     const nombre = await this.fotosService.guardar(archivo);
     try {
-      await this.prisma.fotoFicha.create({
-        data: { fichaId: id, tipo, archivo: nombre },
+      // Through the record, so actualizadaEn shows the photo change too.
+      await this.prisma.fichaTecnica.update({
+        where: { id },
+        data: {
+          actualizadaEn: new Date(),
+          fotos: { create: { tipo, archivo: nombre } },
+        },
       });
     } catch (error) {
       await this.fotosService.borrar(nombre);
@@ -217,14 +227,17 @@ export class FichasService {
     return this.findOne(id);
   }
 
-  // While the record is open it's a draft: the file is deleted too.
+  // The file is deleted too, also from a closed record (the client stops seeing it).
   async quitarFoto(id: number, fotoId: number, actor: PublicUser) {
     const ficha = await this.findParaEditar(id, actor);
     const foto = ficha.fotos.find((f) => f.id === fotoId);
     if (!foto) {
       throw new NotFoundException('Foto no encontrada');
     }
-    await this.prisma.fotoFicha.delete({ where: { id: fotoId } });
+    await this.prisma.fichaTecnica.update({
+      where: { id },
+      data: { actualizadaEn: new Date(), fotos: { delete: { id: fotoId } } },
+    });
     await this.fotosService.borrar(foto.archivo);
     return this.findOne(id);
   }
@@ -273,17 +286,13 @@ export class FichasService {
     return ficha;
   }
 
+  // Also once closed (PWA-255): its professional keeps editing it from the client's history.
   private async findParaEditar(
     id: number,
     actor: PublicUser,
   ): Promise<FichaCompleta> {
     const ficha = await this.findActiva(id);
     this.assertEsSuyo(ficha.turnoDetalle.profesionalId, actor);
-    if (ficha.cerradaEn) {
-      throw new BadRequestException(
-        'La ficha está cerrada: el turno ya se completó',
-      );
-    }
     return ficha;
   }
 

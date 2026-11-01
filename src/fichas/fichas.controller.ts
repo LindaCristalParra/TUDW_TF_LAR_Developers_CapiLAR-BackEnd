@@ -102,8 +102,8 @@ export class FichasController {
    * Subir una foto de antes o después (el profesional de ese servicio)
    *
    * @remarks `multipart/form-data` con la imagen en `foto` (JPG, PNG o WEBP de
-   * hasta 2 MB) y `tipo` = `ANTES` o `DESPUES`. Hasta 5 de cada una, mientras la
-   * ficha está abierta. Devuelve la ficha.
+   * hasta 2 MB) y `tipo` = `ANTES` o `DESPUES`. Hasta 5 de cada una, también con
+   * la ficha cerrada. Devuelve la ficha.
    */
   @Post('fichas/:id/fotos')
   @UseInterceptors(SubirFotoInterceptor)
@@ -132,7 +132,7 @@ export class FichasController {
     );
   }
 
-  /** Quitar una foto (el profesional de ese servicio, mientras la ficha está abierta) */
+  /** Quitar una foto (el profesional de ese servicio, también con la ficha cerrada) */
   @Delete('fichas/:id/fotos/:fotoId')
   quitarFoto(
     @Param('id', ParseIdPipe) id: number,
@@ -151,7 +151,10 @@ export class FichasController {
   /**
    * Editar una ficha (el profesional de ese servicio)
    *
-   * @remarks Solo mientras está abierta: se cierra cuando el turno se completa.
+   * @remarks También después de cerrada (cuando el turno se completa), desde el
+   * historial de la clienta: ella ve los cambios en `GET /fichas/mias` y
+   * `actualizadaEn` muestra la última edición (incluye subir o quitar fotos).
+   * Otro profesional: 403.
    * `null` (o `""` en los textos) borra un campo.
    */
   @Patch('fichas/:id')
@@ -163,7 +166,12 @@ export class FichasController {
     return this.fichasService.update(id, dto, req.user as PublicUser);
   }
 
-  /** Quitar una ficha (el profesional de ese servicio, mientras está abierta) */
+  /**
+   * Quitar una ficha (el profesional de ese servicio)
+   *
+   * @remarks Solo mientras está abierta: una ficha cerrada es parte del historial
+   * de la clienta y responde 400.
+   */
   @Delete('fichas/:id')
   async deactivate(@Param('id', ParseIdPipe) id: number, @Req() req: Request) {
     await this.fichasService.deactivate(id, req.user as PublicUser);
