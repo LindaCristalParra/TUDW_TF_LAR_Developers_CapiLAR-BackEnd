@@ -6,8 +6,10 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import { Trim } from '../../auth/dto/trim.decorator';
 import { IsFecha } from '../../common/fecha-hora';
@@ -20,6 +22,14 @@ import {
 
 const DOS_DECIMALES = { maxDecimalPlaces: 2 };
 const TRES_DECIMALES = { maxDecimalPlaces: 3 };
+
+// The largest values the columns hold: DECIMAL(10,2) for prices and contents, DECIMAL(10,3) for
+// stock. Beyond that MySQL rejects the value (a 500 instead of a 400).
+export const MAX_DECIMAL_10_2 = 99_999_999.99;
+export const MAX_DECIMAL_10_3 = 9_999_999.999;
+
+// Optional but not nullable (NOT NULL column with a default): unlike @IsOptional(), null is validated.
+const SiSeEnvia = () => ValidateIf((_, value) => value !== undefined);
 
 // Decorators run bottom-up, so the most basic rule goes last (see stopAtFirstError in main.ts).
 export class CreateArticuloDto {
@@ -63,6 +73,9 @@ export class CreateArticuloDto {
    * Lo que paga el salón por un envase, en pesos.
    * @example 12500
    */
+  @Max(MAX_DECIMAL_10_2, {
+    message: 'El precio de costo no puede superar los $99.999.999,99',
+  })
   @Min(0, { message: 'El precio de costo no puede ser negativo' })
   @IsNumber(DOS_DECIMALES, {
     message: 'El precio de costo debe ser un número con hasta 2 decimales',
@@ -74,6 +87,9 @@ export class CreateArticuloDto {
    * Precio de venta de un envase, opcional (para los de uso VENTA o AMBOS). `null` lo borra.
    * @example 18000
    */
+  @Max(MAX_DECIMAL_10_2, {
+    message: 'El precio de venta no puede superar los $99.999.999,99',
+  })
   @Min(0, { message: 'El precio de venta no puede ser negativo' })
   @IsNumber(DOS_DECIMALES, {
     message: 'El precio de venta debe ser un número con hasta 2 decimales',
@@ -85,6 +101,9 @@ export class CreateArticuloDto {
    * Contenido de un envase, en `tipoPeso`.
    * @example 260
    */
+  @Max(MAX_DECIMAL_10_2, {
+    message: 'El contenido del envase no puede superar 99.999.999,99',
+  })
   @IsPositive({ message: 'El contenido del envase debe ser mayor a 0' })
   @IsNumber(DOS_DECIMALES, {
     message: 'El contenido del envase debe ser un número con hasta 2 decimales',
@@ -121,11 +140,14 @@ export class CreateArticuloDto {
    * Stock mínimo, en envases (admite decimales). Por defecto 0.
    * @example 2
    */
+  @Max(MAX_DECIMAL_10_3, {
+    message: 'El stock mínimo no puede superar los 9.999.999,999 envases',
+  })
   @Min(0, { message: 'El stock mínimo no puede ser negativo' })
   @IsNumber(TRES_DECIMALES, {
     message: 'El stock mínimo debe ser un número con hasta 3 decimales',
   })
-  @IsOptional()
+  @SiSeEnvia()
   stockMinAlert?: number;
 
   /**
@@ -141,10 +163,13 @@ export class CreateArticuloDto {
    * con los movimientos. Por defecto 0.
    * @example 6
    */
+  @Max(MAX_DECIMAL_10_3, {
+    message: 'El stock no puede superar los 9.999.999,999 envases',
+  })
   @Min(0, { message: 'El stock no puede ser negativo' })
   @IsNumber(TRES_DECIMALES, {
     message: 'El stock debe ser un número con hasta 3 decimales',
   })
-  @IsOptional()
+  @SiSeEnvia()
   stock?: number;
 }
