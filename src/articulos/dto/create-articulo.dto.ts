@@ -84,7 +84,8 @@ export class CreateArticuloDto {
   precioCosto: number;
 
   /**
-   * Precio de venta de un envase, opcional (para los de uso VENTA o AMBOS). `null` lo borra.
+   * Precio de venta de un envase. Obligatorio para los de uso VENTA o AMBOS; los de uso
+   * SALON no lo llevan (400). Al pasar un artículo a SALON se borra solo.
    * @example 18000
    */
   @Max(MAX_DECIMAL_10_2, {

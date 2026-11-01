@@ -58,7 +58,8 @@ export class ArticulosController {
    *
    * @remarks El back genera el texto del QR (`qr`, ej. "ART-7K2M9QXP"); el front
    * arma la imagen. `stock` es el stock inicial: después cambia con los
-   * movimientos. 400 si la marca no existe.
+   * movimientos. `precioVenta` es obligatorio para uso VENTA o AMBOS y no va en
+   * SALON. 400 si la marca no existe.
    */
   @Post()
   @Roles(Rol.ADMIN)
@@ -70,7 +71,9 @@ export class ArticulosController {
    * Modificar un artículo (solo ADMIN)
    *
    * @remarks Se actualizan solo los campos enviados; el stock no (cambia con los
-   * movimientos). 404 si no existe o está dado de baja; 400 si la marca no existe.
+   * movimientos). Se valida cómo queda el artículo: uso VENTA o AMBOS sin
+   * `precioVenta` es 400; pasar a SALON borra el precio de venta (mandarlo con
+   * SALON es 400). 404 si no existe o está dado de baja; 400 si la marca no existe.
    */
   @Patch(':id')
   @Roles(Rol.ADMIN)

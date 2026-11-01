@@ -93,6 +93,14 @@ interface ArticuloSeed {
 const { SALON, VENTA, AMBOS } = UsoArticulo;
 const { G, ML, UNIDAD } = UnidadInsumo;
 
+// Items that are sold need a sale price (ArticulosService). The lists only bring the cost, so the
+// seed makes one up for testing: cost + 60 %, rounded to $100. Salon-only items get none.
+function precioVentaDePrueba(articulo: ArticuloSeed): number | null {
+  return articulo.uso === SALON
+    ? null
+    : Math.round((articulo.precioCosto * 1.6) / 100) * 100;
+}
+
 // From the Meraki price lists (August 2026): list price = what the salon pays (precioCosto).
 // The salon-size colour products aren't in those lists: they are marked "(prueba)".
 const STOCK: {
@@ -345,6 +353,7 @@ async function seedStock(prisma: PrismaClient) {
           articulos: {
             create: articulos.map((articulo) => ({
               ...articulo,
+              precioVenta: precioVentaDePrueba(articulo),
               qr: libres.pop()!,
             })),
           },

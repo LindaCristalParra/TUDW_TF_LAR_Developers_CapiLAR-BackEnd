@@ -7,6 +7,7 @@ import { randomInt } from 'crypto';
 import { esErrorPrisma } from '../common/errores-prisma';
 import { dateAFecha, esFechaValida, fechaADate } from '../common/fecha-hora';
 import { Prisma, UsoArticulo } from '../generated/prisma/client';
+import { marcaParaApi } from '../marcas/marca-api';
 import { MarcasService } from '../marcas/marcas.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateArticuloDto } from './dto/create-articulo.dto';
@@ -74,6 +75,7 @@ export class ArticulosService {
   }
 
   async create(dto: CreateArticuloDto) {
+    this.assertPrecioVenta(dto.uso, dto.precioVenta);
     await this.assertMarcaExiste(dto.marcaId);
     const data = {
       ...dto,
@@ -101,13 +103,24 @@ export class ArticulosService {
   }
 
   async update(id: number, dto: UpdateArticuloDto) {
-    await this.findActivo(id);
+    const actual = await this.findActivo(id);
+    // The rule applies to how the item ends up: a new use with the old price, or the other way round.
+    const uso = dto.uso ?? actual.uso;
+    const pasaASalon = uso === UsoArticulo.SALON && actual.uso !== uso;
+    const precioVenta =
+      dto.precioVenta !== undefined
+        ? dto.precioVenta
+        : pasaASalon
+          ? null // Becoming a salon-only item drops the sale price it had.
+          : actual.precioVenta;
+    this.assertPrecioVenta(uso, precioVenta);
     if (dto.marcaId !== undefined) {
       await this.assertMarcaExiste(dto.marcaId);
     }
     const data = {
       ...dto,
       ...this.opcionales(dto),
+      precioVenta,
       fechaVencimiento: this.fechaVencimiento(dto.fechaVencimiento),
     };
     try {
@@ -149,6 +162,24 @@ export class ArticulosService {
   }
 
   // --- helpers ---
+
+  // Items that are sold (VENTA, AMBOS) need a sale price; salon-only ones (SALON) can't have one.
+  private assertPrecioVenta(
+    uso: UsoArticulo,
+    precioVenta: Prisma.Decimal | number | null | undefined,
+  ): void {
+    const tienePrecio = precioVenta !== null && precioVenta !== undefined;
+    if (uso === UsoArticulo.SALON && tienePrecio) {
+      throw new BadRequestException(
+        'Un artículo de uso SALON no lleva precio de venta',
+      );
+    }
+    if (uso !== UsoArticulo.SALON && !tienePrecio) {
+      throw new BadRequestException(
+        'El precio de venta es obligatorio para los artículos de uso VENTA o AMBOS',
+      );
+    }
+  }
 
   // A missing brand is the client's mistake (400); any other error (e.g. the database is down)
   // goes on as it is, so it still ends in a 500.
@@ -220,6 +251,7 @@ export class ArticulosService {
     const { fechaVencimiento } = articulo;
     return {
       ...articulo,
+      marca: marcaParaApi(articulo.marca),
       fechaVencimiento: fechaVencimiento ? dateAFecha(fechaVencimiento) : null,
       // At the minimum or below (with minimum 0, an item with no stock left).
       bajoStock: articulo.stock.lte(articulo.stockMinAlert),

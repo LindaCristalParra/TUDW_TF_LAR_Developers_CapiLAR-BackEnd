@@ -396,10 +396,12 @@ enum TipoDeposito {
 }
 
 // Brand + product line (e.g. Fidelité / Argán). No logical delete in the DER: removed only when unused.
+// No line is stored as '' (not NULL), so the unique index also stops a repeated brand without a line
+// (MySQL lets NULLs repeat). The API shows it as null (marcaParaApi).
 model Marca {
-  id          Int     @id @default(autoincrement())
-  razonSocial String  @db.VarChar(100)
-  linea       String? @db.VarChar(100)
+  id          Int    @id @default(autoincrement())
+  razonSocial String @db.VarChar(100)
+  linea       String @default("") @db.VarChar(100)
 
   articulos Articulo[]
 

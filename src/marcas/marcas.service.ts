@@ -8,10 +8,11 @@ import { Marca } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMarcaDto } from './dto/create-marca.dto';
 import { UpdateMarcaDto } from './dto/update-marca.dto';
+import { lineaParaBase, MarcaApi, marcaParaApi } from './marca-api';
 
 const MARCA_EN_USO = 'La marca tiene artículos cargados: no se puede borrar';
 
-function marcaRepetida(linea: string | null): ConflictException {
+function marcaRepetida(linea: string): ConflictException {
   return new ConflictException(
     linea
       ? 'Ya existe esa línea para esa marca'
@@ -19,42 +20,49 @@ function marcaRepetida(linea: string | null): ConflictException {
   );
 }
 
+// Duplicates are stopped by the unique index (razonSocial, linea), also without a line ('' is
+// stored, not NULL): two requests at the same time can't both insert, the second gets P2002 → 409.
+// The collation is case-insensitive, so "argán" and "Argán" are the same line.
 @Injectable()
 export class MarcasService {
   constructor(private readonly prisma: PrismaService) {}
 
-  findAll(): Promise<Marca[]> {
-    return this.prisma.marca.findMany({
+  async findAll(): Promise<MarcaApi[]> {
+    const marcas = await this.prisma.marca.findMany({
       orderBy: [{ razonSocial: 'asc' }, { linea: 'asc' }],
     });
+    return marcas.map(marcaParaApi);
   }
 
-  async create(dto: CreateMarcaDto): Promise<Marca> {
-    const data = { razonSocial: dto.razonSocial, linea: dto.linea || null };
-    await this.assertLibre(data.razonSocial, data.linea);
+  async create(dto: CreateMarcaDto): Promise<MarcaApi> {
+    const data = {
+      razonSocial: dto.razonSocial,
+      linea: lineaParaBase(dto.linea),
+    };
     try {
-      return await this.prisma.marca.create({ data });
+      return marcaParaApi(await this.prisma.marca.create({ data }));
     } catch (error) {
-      // Someone created the same one between the check and the insert.
       throw esErrorPrisma(error, 'P2002') ? marcaRepetida(data.linea) : error;
     }
   }
 
-  async update(id: number, dto: UpdateMarcaDto): Promise<Marca> {
+  async update(id: number, dto: UpdateMarcaDto): Promise<MarcaApi> {
     const marca = await this.findOrFail(id);
     const razonSocial = dto.razonSocial ?? marca.razonSocial;
-    const linea = dto.linea === undefined ? marca.linea : dto.linea || null;
-    await this.assertLibre(razonSocial, linea, id);
+    const linea =
+      dto.linea === undefined ? marca.linea : lineaParaBase(dto.linea);
     try {
-      return await this.prisma.marca.update({
-        where: { id },
-        data: { razonSocial, linea },
-      });
+      return marcaParaApi(
+        await this.prisma.marca.update({
+          where: { id },
+          data: { razonSocial, linea },
+        }),
+      );
     } catch (error) {
-      // Races with another request: a duplicate saved meanwhile, or the brand deleted.
       if (esErrorPrisma(error, 'P2002')) {
         throw marcaRepetida(linea);
       }
+      // Deleted between the lookup and the update.
       if (esErrorPrisma(error, 'P2025')) {
         throw new NotFoundException('Marca no encontrada');
       }
@@ -83,27 +91,12 @@ export class MarcasService {
     }
   }
 
+  // The row as stored (linea '' when there is none); for the API use marcaParaApi.
   async findOrFail(id: number): Promise<Marca> {
     const marca = await this.prisma.marca.findUnique({ where: { id } });
     if (!marca) {
       throw new NotFoundException('Marca no encontrada');
     }
     return marca;
-  }
-
-  // Checked in code: the unique index lets "Fidelité" without a line repeat (NULLs never collide).
-  // With a line the index also backs it up (P2002, caught above). The collation is
-  // case-insensitive, so "argán" and "Argán" are the same line.
-  private async assertLibre(
-    razonSocial: string,
-    linea: string | null,
-    id?: number,
-  ): Promise<void> {
-    const otra = await this.prisma.marca.findFirst({
-      where: { razonSocial, linea, id: id ? { not: id } : undefined },
-    });
-    if (otra) {
-      throw marcaRepetida(linea);
-    }
   }
 }
