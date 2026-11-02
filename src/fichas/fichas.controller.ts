@@ -51,7 +51,9 @@ export class FichasController {
    * `producto` (nombre), `marca` ("Marca Línea"), `tono` (tonalidad) y `unidad`
    * (tipoPeso) e ignora lo que venga. Solo artículos activos de uso SALON o
    * AMBOS (`GET /articulos?uso=SALON`); inexistente, dado de baja o VENTA → 400
-   * y no se guarda nada. Guardar no mueve stock: se descuenta al completar el
+   * y no se guarda nada; también si el costo de un insumo pasaría
+   * $99.999.999,99 o su consumo 9.999.999,999 envases (con los valores actuales
+   * del artículo). Guardar no mueve stock: se descuenta al completar el
    * turno (`PATCH /turnos/:id/completar`), y ahí se calcula `costoSubtotal`
    * de cada insumo con artículo (mientras está abierta, `null`).
    */

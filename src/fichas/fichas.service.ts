@@ -6,6 +6,10 @@ import {
   NotFoundException,
   StreamableFile,
 } from '@nestjs/common';
+import {
+  MAX_DECIMAL_10_2,
+  MAX_DECIMAL_10_3,
+} from '../articulos/dto/create-articulo.dto';
 import { ahoraEnSalon, dateAFecha } from '../common/fecha-hora';
 import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
 import {
@@ -18,7 +22,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { tramosDeDetalles } from '../turnos/agenda';
 import { PublicUser } from '../users/users.service';
-import { ConsumoService, gramosPorArticulo } from './consumo.service';
+import {
+  ConsumoService,
+  costoDeInsumo,
+  envasesUsados,
+  gramosPorArticulo,
+} from './consumo.service';
 import { CreateFichaDto } from './dto/create-ficha.dto';
 import { FichaDto } from './dto/ficha.dto';
 import { FormulaDto } from './dto/formula.dto';
@@ -428,7 +437,47 @@ export class FichasService {
         );
       }
     }
+    this.assertConsumoEnRango(formulas, porId);
     return porId;
+  }
+
+  // What completing the turno will store, with the item as it is now: out of the columns' range, the
+  // turno couldn't be completed (decided 01/11: checked here, when the professional loads it).
+  private assertConsumoEnRango(
+    formulas: FormulaDto[],
+    articulos: Map<
+      number,
+      { nombre: string } & Parameters<typeof costoDeInsumo>[0]
+    >,
+  ): void {
+    const insumos = formulas.flatMap((f) =>
+      (f.insumos ?? []).flatMap((i) =>
+        i.articuloId != null && i.cantidad != null
+          ? [
+              {
+                articuloId: i.articuloId,
+                cantidad: new Prisma.Decimal(i.cantidad),
+              },
+            ]
+          : [],
+      ),
+    );
+    for (const { articuloId, cantidad } of insumos) {
+      const articulo = articulos.get(articuloId)!;
+      if (costoDeInsumo(articulo, cantidad).gt(MAX_DECIMAL_10_2)) {
+        throw new BadRequestException(
+          `El costo de ${articulo.nombre} supera $99.999.999,99: revisá la cantidad`,
+        );
+      }
+    }
+    for (const [articuloId, gramos] of gramosPorArticulo(insumos)) {
+      const articulo = articulos.get(articuloId)!;
+      if (envasesUsados(gramos, articulo.pesoInicial).gt(MAX_DECIMAL_10_3)) {
+        throw new BadRequestException(
+          `El consumo de ${articulo.nombre} supera los 9.999.999,999 envases: revisá la cantidad`,
+        );
+      }
+    }
   }
 
   // "" in a text field clears it, like null.
