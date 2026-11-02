@@ -25,6 +25,22 @@ function sumar(mapa: Map<number, Decimal>, id: number, valor: Decimal) {
   mapa.set(id, (mapa.get(id) ?? new Decimal(0)).plus(valor));
 }
 
+// Containers used, with the stock's 3 decimals.
+export function envasesUsados(gramos: Decimal, pesoInicial: Decimal) {
+  return gramos.div(pesoInicial).toDecimalPlaces(3, Decimal.ROUND_HALF_UP);
+}
+
+// precioCosto / pesoInicial × cantidad, in pesos.
+export function costoDeInsumo(
+  articulo: { precioCosto: Decimal; pesoInicial: Decimal },
+  cantidad: Decimal,
+) {
+  return articulo.precioCosto
+    .div(articulo.pesoInicial)
+    .times(cantidad)
+    .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+}
+
 // Supplies without an item don't count.
 export function gramosPorArticulo(
   insumos: { articuloId: number | null; cantidad: Decimal | null }[],
@@ -92,7 +108,14 @@ export class ConsumoService {
       }
       sumar(descontado.get(fichaId)!, m.articuloId, m.cantidad.negated());
     }
+    // Also the items the edit removed: their container gets back what they used, even when it was too
+    // little to discount a container (debido rounded to 0, no CONSUMO line).
     const articuloIds = new Set(movimientos.map((m) => m.articuloId));
+    for (const { gramosAntes } of fichas) {
+      for (const id of gramosAntes?.keys() ?? []) {
+        articuloIds.add(id);
+      }
+    }
     for (const ficha of datos) {
       for (const insumo of ficha.formulas.flatMap((f) => f.insumos)) {
         articuloIds.add(insumo.articuloId!);
@@ -113,10 +136,9 @@ export class ConsumoService {
         const articulo = articulos.get(insumo.articuloId!)!;
         const cantidad = insumo.cantidad ?? new Decimal(0);
         sumar(gramos, articulo.id, cantidad);
-        const costo = articulo.precioCosto
-          .div(articulo.pesoInicial)
-          .times(cantidad)
-          .toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+        // With the current price, also on an edit (decided 01/11): the formulas are replaced whole.
+        const costo = costoDeInsumo(articulo, cantidad);
+        // Already checked when the record was saved; only a later price change gets here.
         if (costo.gt(MAX_DECIMAL_10_2)) {
           throw new BadRequestException(
             `El costo de ${articulo.nombre} en la ficha ${ficha.id} supera $99.999.999,99`,
@@ -131,12 +153,15 @@ export class ConsumoService {
       const yaDescontado = descontado.get(ficha.id) ?? new Map();
       const gramosAntes = fichas.find((f) => f.id === ficha.id)?.gramosAntes;
       const detalles: { articuloId: number; cantidad: Decimal }[] = [];
-      for (const id of new Set([...gramos.keys(), ...yaDescontado.keys()])) {
+      const todos = [
+        ...gramos.keys(),
+        ...yaDescontado.keys(),
+        ...(gramosAntes?.keys() ?? []),
+      ];
+      for (const id of new Set(todos)) {
         const articulo = articulos.get(id)!;
         const usados = gramos.get(id) ?? new Decimal(0);
-        const debido = usados
-          .div(articulo.pesoInicial)
-          .toDecimalPlaces(3, Decimal.ROUND_HALF_UP);
+        const debido = envasesUsados(usados, articulo.pesoInicial);
         const diferencia = debido.minus(yaDescontado.get(id) ?? 0);
         sumar(cambioGramos, id, usados.minus(gramosAntes?.get(id) ?? 0));
         if (diferencia.isZero()) {
