@@ -56,7 +56,9 @@ export class MovimientosController {
    * porPagina }` (por defecto 50 por página, máximo 200). Cada item tiene el
    * mismo formato que `movimiento` del POST: `cantidad` con signo (lo que cambió
    * el stock), `tipo`, `motivo`, `numComprobante` y quién lo registró
-   * (`usuario`). El stock inicial del alta es un INGRESO "Stock inicial".
+   * (`usuario`). El stock inicial del alta es un INGRESO "Stock inicial". Lo
+   * que usa una ficha técnica es un CONSUMO "Ficha N" (al completar el turno, y
+   * sus correcciones al editarla cerrada); no se registra a mano.
    * También de un artículo dado de baja; 404 si no existe. Una página después
    * de la última trae `items` vacío.
    */

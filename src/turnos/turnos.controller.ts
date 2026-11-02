@@ -171,6 +171,13 @@ export class TurnosController {
    * Marcar un turno como completado (profesional del turno)
    *
    * @remarks CONFIRMADO → COMPLETADO, a partir de la hora de inicio del turno.
+   * Cierra sus fichas y descuenta del stock los insumos con artículo: por
+   * ficha, un movimiento CONSUMO (`cantidad / pesoInicial` envases, a nombre
+   * de su profesional), y baja también el envase abierto (`pesoActual`, no
+   * menos de 0). Calcula `costoSubtotal` de cada insumo (`precioCosto /
+   * pesoInicial × cantidad`). Sin stock suficiente se descuenta igual: el
+   * turno viene con `sinStock: [{ id, nombre, stock }]` (los artículos que
+   * quedaron por debajo de 0; vacío si ninguno).
    */
   @Patch(':id/completar')
   @Roles(Rol.PROFESIONAL)

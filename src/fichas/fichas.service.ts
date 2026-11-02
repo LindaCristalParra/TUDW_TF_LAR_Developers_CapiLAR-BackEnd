@@ -6,6 +6,10 @@ import {
   NotFoundException,
   StreamableFile,
 } from '@nestjs/common';
+import {
+  MAX_DECIMAL_10_2,
+  MAX_DECIMAL_10_3,
+} from '../articulos/dto/create-articulo.dto';
 import { ahoraEnSalon, dateAFecha } from '../common/fecha-hora';
 import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
 import {
@@ -18,6 +22,12 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { tramosDeDetalles } from '../turnos/agenda';
 import { PublicUser } from '../users/users.service';
+import {
+  ConsumoService,
+  costoDeInsumo,
+  envasesUsados,
+  gramosPorArticulo,
+} from './consumo.service';
 import { CreateFichaDto } from './dto/create-ficha.dto';
 import { FichaDto } from './dto/ficha.dto';
 import { FormulaDto } from './dto/formula.dto';
@@ -55,6 +65,7 @@ export class FichasService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly fotosService: FotosService,
+    private readonly consumoService: ConsumoService,
   ) {}
 
   // Only the professional of that service, while the turno is CONFIRMADO and once the service started.
@@ -124,6 +135,8 @@ export class FichasService {
   }
 
   // Formulas sent → they replace the old ones (in the same update); not sent → untouched.
+  // A closed record's stock was already discounted: new formulas move only the difference (PWA-176),
+  // and sinStock tells which items went below 0.
   async update(id: number, dto: FichaDto, actor: PublicUser) {
     const ficha = await this.findParaEditar(id, actor);
     const { formulas, ...campos } = dto;
@@ -132,27 +145,65 @@ export class FichasService {
         f.insumos.flatMap((i) => (i.articuloId != null ? [i.articuloId] : [])),
       ),
     );
-    const actualizada = await this.prisma.fichaTecnica.update({
-      where: { id: ficha.id },
-      data: {
-        ...this.limpiar(campos),
-        formulas: formulas && {
-          deleteMany: {},
-          create: await this.formulasData(formulas, yaEnLaFicha),
-        },
+    const nuevas = formulas && (await this.formulasData(formulas, yaEnLaFicha));
+    const sinStock = await this.prisma.$transaction(
+      async (tx) => {
+        // Like completing the turno (record first, then items): an edit and a completion of the
+        // same record wait for each other, so the closing and the supplies are read as they are now.
+        await tx.$queryRaw`SELECT id FROM FichaTecnica WHERE id = ${id} FOR UPDATE`;
+        const actual = await tx.fichaTecnica.findUniqueOrThrow({
+          where: { id },
+          select: {
+            cerradaEn: true,
+            fechaBaja: true,
+            formulas: {
+              select: {
+                insumos: { select: { articuloId: true, cantidad: true } },
+              },
+            },
+          },
+        });
+        if (actual.fechaBaja) {
+          throw new NotFoundException('Ficha no encontrada');
+        }
+        await tx.fichaTecnica.update({
+          where: { id },
+          data: {
+            ...this.limpiar(campos),
+            formulas: nuevas && { deleteMany: {}, create: nuevas },
+          },
+        });
+        if (!nuevas || !actual.cerradaEn) {
+          return undefined;
+        }
+        const gramosAntes = gramosPorArticulo(
+          actual.formulas.flatMap((f) => f.insumos),
+        );
+        return this.consumoService.ajustar(tx, [{ id, gramosAntes }]);
       },
-      include: fichaInclude,
-    });
-    return this.formatear(actualizada);
+      // Like a manual movement: it may wait for other movements of the same items.
+      { maxWait: 10_000, timeout: 10_000 },
+    );
+    const actualizada = await this.findOne(id);
+    return sinStock ? { ...actualizada, sinStock } : actualizada;
   }
 
-  // Logical delete, only while it's open.
+  // Logical delete, only while it's open: a closed one is part of the client's history.
+  // Conditional, so it can't win a race with completing the turno: a record closed (and discounted) in
+  // between stays, since ajustar skips deactivated ones and its CONSUMO couldn't be corrected anymore.
   async deactivate(id: number, actor: PublicUser): Promise<void> {
     const ficha = await this.findParaEditar(id, actor);
-    await this.prisma.fichaTecnica.update({
-      where: { id: ficha.id },
+    const { count } = await this.prisma.fichaTecnica.updateMany({
+      where: { id: ficha.id, cerradaEn: null, fechaBaja: null },
       data: { fechaBaja: new Date() },
     });
+    if (!count) {
+      // Closed, or deactivated by a simultaneous request (findActiva → 404).
+      await this.findActiva(id);
+      throw new BadRequestException(
+        'La ficha está cerrada: el turno ya se completó',
+      );
+    }
   }
 
   async findOne(id: number) {
@@ -213,8 +264,13 @@ export class FichasService {
     }
     const nombre = await this.fotosService.guardar(archivo);
     try {
-      await this.prisma.fotoFicha.create({
-        data: { fichaId: id, tipo, archivo: nombre },
+      // Through the record, so actualizadaEn shows the photo change too.
+      await this.prisma.fichaTecnica.update({
+        where: { id },
+        data: {
+          actualizadaEn: new Date(),
+          fotos: { create: { tipo, archivo: nombre } },
+        },
       });
     } catch (error) {
       await this.fotosService.borrar(nombre);
@@ -223,14 +279,17 @@ export class FichasService {
     return this.findOne(id);
   }
 
-  // While the record is open it's a draft: the file is deleted too.
+  // The file is deleted too, also from a closed record (the client stops seeing it).
   async quitarFoto(id: number, fotoId: number, actor: PublicUser) {
     const ficha = await this.findParaEditar(id, actor);
     const foto = ficha.fotos.find((f) => f.id === fotoId);
     if (!foto) {
       throw new NotFoundException('Foto no encontrada');
     }
-    await this.prisma.fotoFicha.delete({ where: { id: fotoId } });
+    await this.prisma.fichaTecnica.update({
+      where: { id },
+      data: { actualizadaEn: new Date(), fotos: { delete: { id: fotoId } } },
+    });
     await this.fotosService.borrar(foto.archivo);
     return this.findOne(id);
   }
@@ -279,17 +338,13 @@ export class FichasService {
     return ficha;
   }
 
+  // Also once closed (PWA-255): its professional keeps editing it from the client's history.
   private async findParaEditar(
     id: number,
     actor: PublicUser,
   ): Promise<FichaCompleta> {
     const ficha = await this.findActiva(id);
     this.assertEsSuyo(ficha.turnoDetalle.profesionalId, actor);
-    if (ficha.cerradaEn) {
-      throw new BadRequestException(
-        'La ficha está cerrada: el turno ya se completó',
-      );
-    }
     return ficha;
   }
 
@@ -382,7 +437,47 @@ export class FichasService {
         );
       }
     }
+    this.assertConsumoEnRango(formulas, porId);
     return porId;
+  }
+
+  // What completing the turno will store, with the item as it is now: out of the columns' range, the
+  // turno couldn't be completed (decided 01/11: checked here, when the professional loads it).
+  private assertConsumoEnRango(
+    formulas: FormulaDto[],
+    articulos: Map<
+      number,
+      { nombre: string } & Parameters<typeof costoDeInsumo>[0]
+    >,
+  ): void {
+    const insumos = formulas.flatMap((f) =>
+      (f.insumos ?? []).flatMap((i) =>
+        i.articuloId != null && i.cantidad != null
+          ? [
+              {
+                articuloId: i.articuloId,
+                cantidad: new Prisma.Decimal(i.cantidad),
+              },
+            ]
+          : [],
+      ),
+    );
+    for (const { articuloId, cantidad } of insumos) {
+      const articulo = articulos.get(articuloId)!;
+      if (costoDeInsumo(articulo, cantidad).gt(MAX_DECIMAL_10_2)) {
+        throw new BadRequestException(
+          `El costo de ${articulo.nombre} supera $99.999.999,99: revisá la cantidad`,
+        );
+      }
+    }
+    for (const [articuloId, gramos] of gramosPorArticulo(insumos)) {
+      const articulo = articulos.get(articuloId)!;
+      if (envasesUsados(gramos, articulo.pesoInicial).gt(MAX_DECIMAL_10_3)) {
+        throw new BadRequestException(
+          `El consumo de ${articulo.nombre} supera los 9.999.999,999 envases: revisá la cantidad`,
+        );
+      }
+    }
   }
 
   // "" in a text field clears it, like null.
@@ -440,6 +535,8 @@ export class FichasService {
       profesional: `${profesional.usuario.nombre} ${profesional.usuario.apellido}`,
       indicacionesCliente: ficha.indicacionesCliente,
       fotos: this.formatearFotos(ficha.fotos),
+      // Its professional can edit it once closed (PWA-255): the date of the last change.
+      actualizadaEn: ficha.actualizadaEn,
     };
   }
 
