@@ -6,6 +6,7 @@ import {
   NotFoundException,
   StreamableFile,
 } from '@nestjs/common';
+import { AlertasStockService } from '../alertas-stock/alertas-stock.service';
 import {
   MAX_DECIMAL_10_2,
   MAX_DECIMAL_10_3,
@@ -66,6 +67,7 @@ export class FichasService {
     private readonly prisma: PrismaService,
     private readonly fotosService: FotosService,
     private readonly consumoService: ConsumoService,
+    private readonly alertasStock: AlertasStockService,
   ) {}
 
   // Only the professional of that service, while the turno is CONFIRMADO and once the service started.
@@ -146,7 +148,7 @@ export class FichasService {
       ),
     );
     const nuevas = formulas && (await this.formulasData(formulas, yaEnLaFicha));
-    const sinStock = await this.prisma.$transaction(
+    const consumo = await this.prisma.$transaction(
       async (tx) => {
         // Like completing the turno (record first, then items): an edit and a completion of the
         // same record wait for each other, so the closing and the supplies are read as they are now.
@@ -184,8 +186,11 @@ export class FichasService {
       // Like a manual movement: it may wait for other movements of the same items.
       { maxWait: 10_000, timeout: 10_000 },
     );
-    const actualizada = await this.findOne(id);
-    return sinStock ? { ...actualizada, sinStock } : actualizada;
+    if (!consumo) {
+      return this.findOne(id);
+    }
+    this.alertasStock.avisar(consumo.enMinimo);
+    return { ...(await this.findOne(id)), sinStock: consumo.sinStock };
   }
 
   // Logical delete, only while it's open: a closed one is part of the client's history.

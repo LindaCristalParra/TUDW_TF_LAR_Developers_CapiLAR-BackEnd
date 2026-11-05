@@ -176,7 +176,8 @@ export class FichasController {
    * Con la ficha cerrada, `formulas` también corrige el stock: se mueve solo la
    * diferencia con lo ya descontado (un movimiento CONSUMO más; usar menos
    * devuelve), `costoSubtotal` se recalcula con el precio actual y la respuesta
-   * suma `sinStock` (como en completar). Sin `formulas`, o con la ficha
+   * suma `sinStock` (como en completar); si un artículo llega al mínimo, los
+   * ADMIN reciben el mail de stock mínimo. Sin `formulas`, o con la ficha
    * abierta, no hay `sinStock`.
    */
   @Patch('fichas/:id')

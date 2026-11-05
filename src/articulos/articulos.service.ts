@@ -4,6 +4,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomInt } from 'crypto';
+import {
+  AlertasStockService,
+  EstadoStock,
+  llegoAlMinimo,
+} from '../alertas-stock/alertas-stock.service';
 import { esErrorPrisma } from '../common/errores-prisma';
 import { dateAFecha, esFechaValida, fechaADate } from '../common/fecha-hora';
 import {
@@ -65,6 +70,7 @@ export class ArticulosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly marcasService: MarcasService,
+    private readonly alertasStock: AlertasStockService,
   ) {}
 
   async findAll(query: ListArticulosQueryDto) {
@@ -167,37 +173,37 @@ export class ArticulosService {
       fechaVencimiento: this.fechaVencimiento(dto.fechaVencimiento),
     };
     try {
-      if (dto.tipoPeso === undefined && dto.pesoInicial === undefined) {
-        const articulo = await this.prisma.articulo.update({
-          where: { id },
-          data,
-          include: articuloInclude,
-        });
-        return this.formatear(articulo);
+      const { articulo, antes } = await this.prisma.$transaction(
+        async (tx) => {
+          const antes = await this.minimoBloqueado(tx, id);
+          await tx.articulo.update({ where: { id }, data });
+          // In another unit pesoActual means nothing: the open container is finished (decided 01/11).
+          if (dto.tipoPeso !== undefined) {
+            await tx.articuloUso.deleteMany({
+              where: { articuloId: id, tipoPeso: { not: dto.tipoPeso } },
+            });
+          }
+          // A smaller container can't hold more than it did: what's left is cut down to the new
+          // content (decided 01/11; most likely a typo fixed while the container stays in use).
+          if (dto.pesoInicial !== undefined) {
+            await tx.articuloUso.updateMany({
+              where: { articuloId: id, pesoActual: { gt: dto.pesoInicial } },
+              data: { pesoActual: dto.pesoInicial },
+            });
+          }
+          const articulo = await tx.articulo.findUniqueOrThrow({
+            where: { id },
+            include: articuloInclude,
+          });
+          return { articulo, antes };
+        },
+        // Like a movement: it may wait for other changes of the same item.
+        { maxWait: 10_000, timeout: 10_000 },
+      );
+      // A higher minimum can leave the current stock at or below it (decided 04/11: it alerts too).
+      if (llegoAlMinimo(antes, articulo, articulo.fechaBaja)) {
+        this.alertasStock.avisar([articulo]);
       }
-      const articulo = await this.prisma.$transaction(async (tx) => {
-        // The update locks the item's row first, so opening or updating the container (which lock
-        // it too) can't slip in between with the old unit or content.
-        await tx.articulo.update({ where: { id }, data });
-        // In another unit pesoActual means nothing: the open container is finished (decided 01/11).
-        if (dto.tipoPeso !== undefined) {
-          await tx.articuloUso.deleteMany({
-            where: { articuloId: id, tipoPeso: { not: dto.tipoPeso } },
-          });
-        }
-        // A smaller container can't hold more than it did: what's left is cut down to the new
-        // content (decided 01/11; most likely a typo fixed while the container stays in use).
-        if (dto.pesoInicial !== undefined) {
-          await tx.articuloUso.updateMany({
-            where: { articuloId: id, pesoActual: { gt: dto.pesoInicial } },
-            data: { pesoActual: dto.pesoInicial },
-          });
-        }
-        return tx.articulo.findUniqueOrThrow({
-          where: { id },
-          include: articuloInclude,
-        });
-      });
       return this.formatear(articulo);
     } catch (error) {
       // The new brand was deleted between the check and the update.
@@ -261,6 +267,27 @@ export class ArticulosService {
       }
       throw error;
     }
+  }
+
+  // Locks the item's row until the transaction ends, like a movement or a record's consumption: the
+  // stock compared with the new minimum can't change in between, and opening or updating the container
+  // (which lock it too) can't slip in with the old unit or content.
+  private async minimoBloqueado(
+    tx: Prisma.TransactionClient,
+    id: number,
+  ): Promise<EstadoStock> {
+    const filas = await tx.$queryRaw<
+      { stock: string; stockMinAlert: string }[]
+    >`
+      SELECT CAST(stock AS CHAR) AS stock, CAST(stockMinAlert AS CHAR) AS stockMinAlert
+      FROM Articulo WHERE id = ${id} FOR UPDATE`;
+    if (!filas[0]) {
+      throw new NotFoundException('Artículo no encontrado');
+    }
+    return {
+      stock: new Prisma.Decimal(filas[0].stock),
+      stockMinAlert: new Prisma.Decimal(filas[0].stockMinAlert),
+    };
   }
 
   private async findOrFail(id: number): Promise<ArticuloConMarca> {

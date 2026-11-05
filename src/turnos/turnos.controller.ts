@@ -177,7 +177,8 @@ export class TurnosController {
    * menos de 0). Calcula `costoSubtotal` de cada insumo (`precioCosto /
    * pesoInicial × cantidad`). Sin stock suficiente se descuenta igual: el
    * turno viene con `sinStock: [{ id, nombre, stock }]` (los artículos que
-   * quedaron por debajo de 0; vacío si ninguno).
+   * quedaron por debajo de 0; vacío si ninguno). Los artículos que llegan al
+   * mínimo van en un solo mail a los ADMIN (los dados de baja no avisan).
    */
   @Patch(':id/completar')
   @Roles(Rol.PROFESIONAL)
