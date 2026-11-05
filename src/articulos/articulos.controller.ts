@@ -41,7 +41,8 @@ export class ArticulosController {
    * `envaseEnUso` es el envase abierto (`{ pesoActual, tipoPeso }`) o null.
    * Para el selector de la ficha: `uso=SALON` (trae también los AMBOS). El
    * PROFESIONAL recibe lo mismo que el ADMIN, `precioCosto` incluido (decisión
-   * del salón).
+   * del salón). El panel de alertas de stock es `bajoStock=true`: cuando un
+   * artículo llega al mínimo, además, los ADMIN reciben un mail.
    */
   @Get()
   @Roles(Rol.ADMIN, Rol.PROFESIONAL)
@@ -98,8 +99,10 @@ export class ArticulosController {
    * `precioVenta` es 400; pasar a SALON borra el precio de venta (mandarlo con
    * SALON es 400). Cambiar `tipoPeso` termina el envase abierto (en otra unidad
    * lo que quedaba no sirve); bajar `pesoInicial` recorta lo que queda en el
-   * envase abierto al contenido nuevo. 404 si no existe o está dado de baja;
-   * 400 si la marca no existe.
+   * envase abierto al contenido nuevo. Si un `stockMinAlert` más alto deja el
+   * stock en el mínimo o debajo, los ADMIN reciben el mail de stock mínimo
+   * (como en los movimientos). 404 si no existe o está dado de baja; 400 si la
+   * marca no existe.
    */
   @Patch(':id')
   @Roles(Rol.ADMIN)

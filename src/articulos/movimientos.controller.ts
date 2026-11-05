@@ -37,7 +37,9 @@ export class MovimientosController {
    * `motivo` es obligatorio en EGRESO y AJUSTE. Un EGRESO puede dejar el stock
    * negativo: se registra igual y `stockNegativo` viene en `true`. Responde
    * `{ movimiento, articulo, stockNegativo }`, con el artículo actualizado.
-   * 404 si el artículo no existe o está dado de baja; 400 si el stock pasaría
+   * Si el stock estaba arriba del mínimo y queda en el mínimo o debajo
+   * (`articulo.bajoStock` pasa a `true`), los ADMIN activos reciben un mail;
+   * una vez por cruce: no se repite hasta que vuelva a estar arriba. 404 si el artículo no existe o está dado de baja; 400 si el stock pasaría
    * los 9.999.999,999 envases.
    */
   @Post(':id/movimientos')
