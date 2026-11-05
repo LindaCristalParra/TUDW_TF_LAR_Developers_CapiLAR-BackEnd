@@ -39,7 +39,8 @@ export class MovimientosController {
    * `{ movimiento, articulo, stockNegativo }`, con el artículo actualizado.
    * Si el stock estaba arriba del mínimo y queda en el mínimo o debajo
    * (`articulo.bajoStock` pasa a `true`), los ADMIN activos reciben un mail;
-   * una vez por cruce: no se repite hasta que vuelva a estar arriba. 404 si el artículo no existe o está dado de baja; 400 si el stock pasaría
+   * una vez por cruce: no se repite hasta que vuelva a estar arriba.
+   * 404 si el artículo no existe o está dado de baja; 400 si el stock pasaría
    * los 9.999.999,999 envases.
    */
   @Post(':id/movimientos')
