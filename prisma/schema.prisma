@@ -452,6 +452,7 @@ model Articulo {
   remitoDetalles RemitoDetalle[]
   envaseEnUso    ArticuloUso?
   formulaInsumos FormulaInsumo[]
+  notificaciones Notificacion[]
 
   @@index([marcaId])
 }
@@ -536,6 +537,7 @@ enum MedioNotificacion {
 enum TipoNotificacion {
   RECORDATORIO
   AGENDA_DIARIA
+  STOCK_MINIMO
 }
 
 enum EstadoEnvio {
@@ -543,12 +545,16 @@ enum EstadoEnvio {
   ERROR
 }
 
-// Notices sent by scheduled jobs (F06 reminder, F07 daily agenda), one row per attempt.
+// Notices sent by scheduled jobs (F06 reminder, F07 daily agenda) and low-stock alerts (F11),
+// one row per attempt.
 model Notificacion {
   id          Int               @id @default(autoincrement())
-  // The reminder's turno; null for the daily agenda.
+  // The reminder's turno; null for the daily agenda and stock alerts.
   turnoId     Int?
-  // Who received it: the client (reminder) or the professional (daily agenda).
+  // STOCK_MINIMO: the item that reached its minimum. One row per ADMIN and item, even when one
+  // mail lists several items.
+  articuloId  Int?
+  // Who received it: the client (reminder), the professional (daily agenda) or an ADMIN (stock).
   usuarioId   Int
   medio       MedioNotificacion
   tipo        TipoNotificacion
@@ -561,8 +567,11 @@ model Notificacion {
   // SHA-256 of the confirm/cancel link token (reminder only).
   tokenHash   String?           @unique @db.Char(64)
 
-  turno   Turno?  @relation(fields: [turnoId], references: [id])
-  usuario Usuario @relation(fields: [usuarioId], references: [id])
+  turno    Turno?    @relation(fields: [turnoId], references: [id])
+  // Explicit Restrict: Prisma's default for an optional relation is SetNull.
+  articulo Articulo? @relation(fields: [articuloId], references: [id], onDelete: Restrict)
+  usuario  Usuario   @relation(fields: [usuarioId], references: [id])
 
   @@index([turnoId, tipo])
+  @@index([articuloId])
 }
