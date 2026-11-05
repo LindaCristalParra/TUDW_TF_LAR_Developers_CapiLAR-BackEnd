@@ -6,7 +6,7 @@ import {
   Rol,
   TipoNotificacion,
 } from '../generated/prisma/client';
-import { MailService } from '../mail/mail.service';
+import { MailService, MailStockMinimo } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 type Decimal = Prisma.Decimal;
@@ -72,20 +72,33 @@ export class AlertasStockService {
         stock: enEnvases(a.stock),
         minimo: enEnvases(a.stockMinAlert),
       }));
-    for (const admin of admins) {
-      let estadoEnvio: EstadoEnvio = EstadoEnvio.ENVIADO;
-      try {
-        await this.mailService.sendStockMinimo(admin.email, {
-          nombre: admin.nombre,
-          articulos: lista,
-        });
-      } catch (error) {
-        estadoEnvio = EstadoEnvio.ERROR;
-        this.logger.error(
-          `Could not send the low-stock alert to ${admin.email}`,
-          error instanceof Error ? error.stack : String(error),
-        );
-      }
+    // In parallel and each on its own: a slow or failed send, or a failed insert, doesn't hold back
+    // or cancel the other ADMINs' alerts.
+    await Promise.all(
+      admins.map((admin) => this.avisarA(admin, articulos, lista)),
+    );
+  }
+
+  // Never throws: every failure is logged.
+  private async avisarA(
+    admin: { id: number; nombre: string; email: string },
+    articulos: ArticuloEnMinimo[],
+    lista: MailStockMinimo['articulos'],
+  ): Promise<void> {
+    let estadoEnvio: EstadoEnvio = EstadoEnvio.ENVIADO;
+    try {
+      await this.mailService.sendStockMinimo(admin.email, {
+        nombre: admin.nombre,
+        articulos: lista,
+      });
+    } catch (error) {
+      estadoEnvio = EstadoEnvio.ERROR;
+      this.logger.error(
+        `Could not send the low-stock alert to ${admin.email}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
+    try {
       await this.prisma.notificacion.createMany({
         data: articulos.map((a) => ({
           usuarioId: admin.id,
@@ -95,6 +108,11 @@ export class AlertasStockService {
           estadoEnvio,
         })),
       });
+    } catch (error) {
+      this.logger.error(
+        `Could not record the low-stock alert for ${admin.email}`,
+        error instanceof Error ? error.stack : String(error),
+      );
     }
   }
 }
