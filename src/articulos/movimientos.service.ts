@@ -3,6 +3,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import {
+  AlertasStockService,
+  EstadoStock,
+  llegoAlMinimo,
+} from '../alertas-stock/alertas-stock.service';
 import { Pagina, PaginacionQueryDto, paginar } from '../common/paginacion';
 import { EstadoRemito, Prisma, TipoRemito } from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -44,6 +49,7 @@ export class MovimientosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly articulosService: ArticulosService,
+    private readonly alertasStock: AlertasStockService,
   ) {}
 
   // Manual movements (INGRESO, EGRESO, AJUSTE): a Remito without supplier, born APLICADO.
@@ -56,12 +62,16 @@ export class MovimientosService {
     if (dto.tipo !== TipoRemito.AJUSTE && dto.cantidad === 0) {
       throw new BadRequestException('La cantidad debe ser mayor a 0');
     }
-    const { detalleId, articulo, stock } = await this.prisma.$transaction(
-      (tx) => this.aplicar(tx, articuloId, dto, usuarioId),
-      // Movements of the same item wait for each other (the row lock), and each one holds a
-      // pooled connection while it waits: Prisma's defaults (2 s / 5 s) are too short for a burst.
-      { maxWait: 10_000, timeout: 10_000 },
-    );
+    const { detalleId, articulo, stock, enMinimo } =
+      await this.prisma.$transaction(
+        (tx) => this.aplicar(tx, articuloId, dto, usuarioId),
+        // Movements of the same item wait for each other (the row lock), and each one holds a
+        // pooled connection while it waits: Prisma's defaults (2 s / 5 s) are too short for a burst.
+        { maxWait: 10_000, timeout: 10_000 },
+      );
+    if (enMinimo) {
+      this.alertasStock.avisar([articulo]);
+    }
     // Read after the commit, so the lock is held as short as possible: the row doesn't change.
     const movimiento = await this.prisma.remitoDetalle.findUniqueOrThrow({
       where: { id: detalleId },
@@ -110,7 +120,8 @@ export class MovimientosService {
     dto: CreateMovimientoDto,
     usuarioId: number,
   ) {
-    const actual = await this.stockBloqueado(tx, articuloId);
+    const antes = await this.stockBloqueado(tx, articuloId);
+    const actual = antes.stock;
     const informada = new Prisma.Decimal(dto.cantidad);
     // Signed, as it is stored: what the stock changes by.
     const cantidad =
@@ -151,25 +162,30 @@ export class MovimientosService {
       data: { stock },
       include: articuloInclude,
     });
-    return { detalleId: id, articulo, stock };
+    // An INGRESO can't bring it down, but an AJUSTE or an EGRESO can.
+    const enMinimo = llegoAlMinimo(antes, articulo, articulo.fechaBaja);
+    return { detalleId: id, articulo, stock, enMinimo };
   }
 
   // Locks the item's row until the transaction ends: another movement of the same item waits, so
-  // the stock read here (an AJUSTE's base) can't change before it is written. 404 if it doesn't
-  // exist or is inactive (it has to be reactivated first).
+  // the stock read here (an AJUSTE's base, the alert's "before") can't change before it is written.
+  // 404 if it doesn't exist or is inactive (it has to be reactivated first).
   private async stockBloqueado(
     tx: Prisma.TransactionClient,
     articuloId: number,
-  ): Promise<Prisma.Decimal> {
+  ): Promise<EstadoStock> {
     const filas = await tx.$queryRaw<
-      { stock: string; fechaBaja: Date | null }[]
+      { stock: string; stockMinAlert: string; fechaBaja: Date | null }[]
     >`
-      SELECT CAST(stock AS CHAR) AS stock, fechaBaja
+      SELECT CAST(stock AS CHAR) AS stock, CAST(stockMinAlert AS CHAR) AS stockMinAlert, fechaBaja
       FROM Articulo WHERE id = ${articuloId} FOR UPDATE`;
     const fila = filas[0];
     if (!fila || fila.fechaBaja !== null) {
       throw new NotFoundException('Artículo no encontrado');
     }
-    return new Prisma.Decimal(fila.stock);
+    return {
+      stock: new Prisma.Decimal(fila.stock),
+      stockMinAlert: new Prisma.Decimal(fila.stockMinAlert),
+    };
   }
 }

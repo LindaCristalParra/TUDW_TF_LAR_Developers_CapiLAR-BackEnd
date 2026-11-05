@@ -11,6 +11,7 @@ import {
   alergiasDeClienteSelect,
   aplanarAlergias,
 } from '../alergias/alergias-de-cliente';
+import { AlertasStockService } from '../alertas-stock/alertas-stock.service';
 import {
   EstadoEnvio,
   EstadoSerie,
@@ -129,6 +130,7 @@ export class TurnosService {
     private readonly verificacionEmail: VerificacionEmailService,
     private readonly whatsAppService: WhatsAppService,
     private readonly consumoService: ConsumoService,
+    private readonly alertasStock: AlertasStockService,
   ) {}
 
   // turnoId (rescheduling) and clienteId (booking for a client) are for professionals only.
@@ -595,7 +597,7 @@ export class TurnosService {
     // The technical records of the turno are closed together with it, and their supplies with an
     // item are discounted from the stock (PWA-176). Without stock it is discounted anyway (decided
     // 31/10) and sinStock tells which items went below 0.
-    const sinStock = await this.prisma.$transaction(
+    const { sinStock, enMinimo } = await this.prisma.$transaction(
       async (tx) => {
         // Only if it's still CONFIRMADO: two "complete" at the same time can't discount twice.
         const { count } = await tx.turno.updateMany({
@@ -620,6 +622,8 @@ export class TurnosService {
       // Like a manual movement: it may wait for other movements of the same items.
       { maxWait: 10_000, timeout: 10_000 },
     );
+    // Items that reached their minimum (PWA-179): the ADMINs get one email after the commit.
+    this.alertasStock.avisar(enMinimo);
     const actualizado = await this.prisma.turno.findUniqueOrThrow({
       where: { id },
       include: turnoInclude,

@@ -1,5 +1,9 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import {
+  ArticuloEnMinimo,
+  llegoAlMinimo,
+} from '../alertas-stock/alertas-stock.service';
+import {
   MAX_DECIMAL_10_2,
   MAX_DECIMAL_10_3,
 } from '../articulos/dto/create-articulo.dto';
@@ -17,8 +21,17 @@ type ArticuloBloqueado = {
   id: number;
   nombre: string;
   stock: Decimal;
+  stockMinAlert: Decimal;
   precioCosto: Decimal;
   pesoInicial: Decimal;
+  fechaBaja: Date | null;
+};
+
+// sinStock: the items it left below 0. enMinimo: the ones that reached their minimum (PWA-179),
+// for the alert the caller sends after its commit.
+export type ResultadoConsumo = {
+  sinStock: ArticuloSinStock[];
+  enMinimo: ArticuloEnMinimo[];
 };
 
 function sumar(mapa: Map<number, Decimal>, id: number, valor: Decimal) {
@@ -60,13 +73,14 @@ export function gramosPorArticulo(
 @Injectable()
 export class ConsumoService {
   // Inside the caller's transaction. gramosAntes: what each record's supplies said before an edit
-  // (empty when the turno is completed), for the open container. Returns the items it left below 0.
+  // (empty when the turno is completed), for the open container.
   async ajustar(
     tx: Prisma.TransactionClient,
     fichas: { id: number; gramosAntes?: GramosPorArticulo }[],
-  ): Promise<ArticuloSinStock[]> {
+  ): Promise<ResultadoConsumo> {
+    const nada: ResultadoConsumo = { sinStock: [], enMinimo: [] };
     if (!fichas.length) {
-      return [];
+      return nada;
     }
     const fichaIds = fichas.map((f) => f.id);
     // Records first and then items, both in id order, so two transactions never wait for each other in a circle.
@@ -122,7 +136,7 @@ export class ConsumoService {
       }
     }
     if (!articuloIds.size) {
-      return [];
+      return nada;
     }
     const articulos = await this.bloquearArticulos(tx, [...articuloIds]);
 
@@ -192,6 +206,7 @@ export class ConsumoService {
     }
 
     const sinStock: ArticuloSinStock[] = [];
+    const enMinimo: ArticuloEnMinimo[] = [];
     for (const [id, cambio] of cambioStock) {
       if (cambio.isZero()) {
         continue;
@@ -207,6 +222,11 @@ export class ConsumoService {
       if (stock.isNegative()) {
         sinStock.push({ id, nombre: articulo.nombre, stock: stock.toString() });
       }
+      // The minimum doesn't change here; an inactive item is discounted but not alerted.
+      const despues = { stock, stockMinAlert: articulo.stockMinAlert };
+      if (llegoAlMinimo(articulo, despues, articulo.fechaBaja)) {
+        enMinimo.push({ id, nombre: articulo.nombre, ...despues });
+      }
     }
     // Opening a container doesn't move stock (decided 01/11): it is informative, between 0 and full.
     // No row (no open container) → nothing to update.
@@ -219,7 +239,7 @@ export class ConsumoService {
         SET u.pesoActual = LEAST(GREATEST(u.pesoActual - CAST(${cambio.toString()} AS DECIMAL(12, 2)), 0), a.pesoInicial)
         WHERE u.articuloId = ${id}`;
     }
-    return sinStock;
+    return { sinStock, enMinimo };
   }
 
   // Locks the items' rows until the transaction ends (like a manual movement). Also an inactive
@@ -233,12 +253,14 @@ export class ConsumoService {
         id: number;
         nombre: string;
         stock: string;
+        stockMinAlert: string;
         precioCosto: string;
         pesoInicial: string;
+        fechaBaja: Date | null;
       }[]
     >`
-      SELECT id, nombre, CAST(stock AS CHAR) AS stock, CAST(precioCosto AS CHAR) AS precioCosto,
-        CAST(pesoInicial AS CHAR) AS pesoInicial
+      SELECT id, nombre, CAST(stock AS CHAR) AS stock, CAST(stockMinAlert AS CHAR) AS stockMinAlert,
+        CAST(precioCosto AS CHAR) AS precioCosto, CAST(pesoInicial AS CHAR) AS pesoInicial, fechaBaja
       FROM Articulo WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
     return new Map(
       filas.map((f) => [
@@ -247,8 +269,10 @@ export class ConsumoService {
           id: Number(f.id),
           nombre: f.nombre,
           stock: new Decimal(f.stock),
+          stockMinAlert: new Decimal(f.stockMinAlert),
           precioCosto: new Decimal(f.precioCosto),
           pesoInicial: new Decimal(f.pesoInicial),
+          fechaBaja: f.fechaBaja,
         },
       ]),
     );
