@@ -24,8 +24,11 @@ import { Rol } from '../generated/prisma/client';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { SidActual } from '../auth/sid-actual.decorator';
+import { PushService } from '../push/push.service';
 import { ListClientesQueryDto } from './dto/list-clientes-query.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
+import { PushTokenDto } from './dto/push-token.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
 import { PublicUser, UsersService } from './users.service';
@@ -37,7 +40,10 @@ import { PublicUser, UsersService } from './users.service';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly pushService: PushService,
+  ) {}
 
   /**
    * Listar usuarios (solo ADMIN)
@@ -104,6 +110,46 @@ export class UsersController {
     return {
       message: `Te mandamos un enlace a ${(req.user as PublicUser).email}`,
     };
+  }
+
+  /**
+   * Registrar el push token de este celular
+   *
+   * @remarks Para la app: el token de Expo (`getExpoPushTokenAsync`). Se guarda
+   * en la sesión de este dispositivo, así que hay que mandarlo después de cada
+   * inicio de sesión. Desde ahí recibe push de sus turnos, además de los mails:
+   * la profesional, los turnos nuevos y las cancelaciones de la clienta; la
+   * clienta, el recordatorio y los cambios del salón (confirmado, rechazado,
+   * reprogramado, cancelado). Al cerrar sesión deja de recibirlos. Si el mismo
+   * celular estaba con otra cuenta, deja de llegarle a esa. 400 si el token no
+   * es de Expo; 401 si la sesión venció o el access token es anterior a esta
+   * ruta (refrescarlo y reintentar).
+   */
+  @Patch('me/push-token')
+  async registrarPushToken(
+    @Req() req: Request,
+    @SidActual() sid: string,
+    @Body() dto: PushTokenDto,
+  ) {
+    await this.pushService.registrarToken(
+      (req.user as PublicUser).id,
+      sid,
+      dto.token,
+    );
+    return { message: 'Notificaciones activadas en este dispositivo' };
+  }
+
+  /**
+   * Dejar de recibir push en este celular
+   *
+   * @remarks Por ejemplo, si se apagan las notificaciones en la app. Los mails
+   * siguen llegando. Responde lo mismo aunque no hubiera token. 401 como en el
+   * PATCH.
+   */
+  @Delete('me/push-token')
+  async quitarPushToken(@Req() req: Request, @SidActual() sid: string) {
+    await this.pushService.quitarToken((req.user as PublicUser).id, sid);
+    return { message: 'Notificaciones desactivadas en este dispositivo' };
   }
 
   /**

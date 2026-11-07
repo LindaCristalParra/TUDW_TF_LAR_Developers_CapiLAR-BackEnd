@@ -270,6 +270,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       rol: user.rol,
+      sid,
     };
     const refreshPayload: RefreshPayload = {
       sub: user.id,
