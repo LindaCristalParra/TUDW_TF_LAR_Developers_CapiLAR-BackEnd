@@ -52,6 +52,19 @@ export class ProveedoresController {
   }
 
   /**
+   * Marcas que se le compraron a un proveedor (solo ADMIN)
+   *
+   * @remarks Sale de sus compras no anuladas (un proveedor no tiene marcas
+   * asignadas: se le puede comprar cualquier artículo). Sin repetir, ordenadas
+   * por nombre; `[]` si todavía no tiene compras. También de un proveedor dado
+   * de baja; 404 si no existe.
+   */
+  @Get(':id/marcas')
+  findMarcas(@Param('id', ParseIdPipe) id: number) {
+    return this.proveedoresService.findMarcas(id);
+  }
+
+  /**
    * Crear un proveedor (solo ADMIN)
    *
    * @remarks El CUIT se valida con su dígito verificador y puede venir con

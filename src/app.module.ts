@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ArticulosModule } from './articulos/articulos.module';
 import { AuthModule } from './auth/auth.module';
+import { ComprasModule } from './compras/compras.module';
 import { FichasModule } from './fichas/fichas.module';
 import { HairColorModule } from './hair-color/hair-color.module';
 import { MarcasModule } from './marcas/marcas.module';
@@ -34,6 +35,7 @@ import { TurnosModule } from './turnos/turnos.module';
     ArticulosModule,
     // F13 suppliers and purchases.
     ProveedoresModule,
+    ComprasModule,
     // TP3, API 1: hair color try-on with YouCam.
     HairColorModule,
   ],

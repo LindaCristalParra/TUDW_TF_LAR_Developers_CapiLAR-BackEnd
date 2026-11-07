@@ -5,7 +5,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { esErrorPrisma } from '../common/errores-prisma';
-import { Prisma, Proveedor } from '../generated/prisma/client';
+import {
+  EstadoRemito,
+  Prisma,
+  Proveedor,
+  TipoRemito,
+} from '../generated/prisma/client';
+import { MarcaApi, marcaParaApi } from '../marcas/marca-api';
 import { PrismaService } from '../prisma/prisma.service';
 import { limpiarCuit } from './cuit';
 import { CreateProveedorDto } from './dto/create-proveedor.dto';
@@ -45,6 +51,31 @@ export class ProveedoresService {
       throw new NotFoundException(NO_ENCONTRADO);
     }
     return proveedor;
+  }
+
+  // Suppliers aren't linked to brands (decided 07/11): what was bought from it comes from its
+  // purchases that weren't cancelled. Also for an inactive supplier; 404 if it doesn't exist.
+  async findMarcas(id: number): Promise<MarcaApi[]> {
+    await this.findOrFail(id);
+    const marcas = await this.prisma.marca.findMany({
+      where: {
+        articulos: {
+          some: {
+            remitoDetalles: {
+              some: {
+                remito: {
+                  proveedorId: id,
+                  tipo: TipoRemito.COMPRA,
+                  estado: { not: EstadoRemito.ANULADO },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [{ razonSocial: 'asc' }, { linea: 'asc' }, { id: 'asc' }],
+    });
+    return marcas.map(marcaParaApi);
   }
 
   async create(dto: CreateProveedorDto): Promise<Proveedor> {
