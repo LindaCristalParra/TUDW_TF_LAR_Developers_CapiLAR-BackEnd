@@ -11,7 +11,7 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
@@ -23,6 +23,7 @@ import { PublicUser } from '../users/users.service';
 import { AccionTurnoDto, CancelarPorTokenDto } from './dto/accion-turno.dto';
 import { AgendaQueryDto } from './dto/agenda-query.dto';
 import { CancelarTurnoDto } from './dto/cancelar-turno.dto';
+import { CompletarTurnoDto } from './dto/completar-turno.dto';
 import { CreateTurnoDto } from './dto/create-turno.dto';
 import { HorariosLibresDto } from './dto/horarios-libres.dto';
 import { RechazarTurnoDto } from './dto/rechazar-turno.dto';
@@ -82,12 +83,20 @@ export class TurnosController {
    * @remarks Turnos entre dos fechas (máx. 31 días), con nombre, teléfono y
    * alergias del cliente (`cliente.alergias` de la lista y `cliente.alergia`,
    * "Otra"). Solo lectura: con `legajo`, la de ese profesional;
-   * sin `legajo`, la de todo el salón.
+   * sin `legajo`, la de todo el salón. Cada servicio trae `precioFinal` (lo
+   * cobrado; null hasta completar).
+   *
+   * Solo para el ADMIN, en los turnos COMPLETADO: cada servicio suma `costo`
+   * (insumos de su ficha activa; sin ficha, 0), `margen` (precioFinal −
+   * costo) y `costoIncompleto` (algún insumo de texto libre, sin costo), y el
+   * turno suma `rentabilidad: { cobrado, costo, margen, costoIncompleto }`. En
+   * los demás estados vienen en null. El PROFESIONAL no los recibe. Totales
+   * por período: `GET /reportes/rentabilidad`.
    */
   @Get('agenda')
   @Roles(Rol.PROFESIONAL, Rol.ADMIN)
-  agenda(@Query() query: AgendaQueryDto) {
-    return this.turnosService.agenda(query);
+  agenda(@Query() query: AgendaQueryDto, @Req() req: Request) {
+    return this.turnosService.agenda(query, req.user as PublicUser);
   }
 
   /**
@@ -179,11 +188,22 @@ export class TurnosController {
    * turno viene con `sinStock: [{ id, nombre, stock }]` (los artículos que
    * quedaron por debajo de 0; vacío si ninguno). Los artículos que llegan al
    * mínimo van en un solo mail a los ADMIN (los dados de baja no avisan).
+   *
+   * Body opcional: `detalles: [{ turnoDetalleId, precioFinal }]` con lo
+   * cobrado por cada servicio (los que no vienen se cobran a su `precioBase`;
+   * 400 si un servicio no es de este turno) y `metodoPago`, que reemplaza al
+   * del turno si viene. `precioFinal` no se puede cambiar después.
    */
   @Patch(':id/completar')
   @Roles(Rol.PROFESIONAL)
-  completar(@Param('id', ParseIdPipe) id: number, @Req() req: Request) {
-    return this.turnosService.completar(id, req.user as PublicUser);
+  // Without it Swagger marks the body as required, and it can be left out.
+  @ApiBody({ type: CompletarTurnoDto, required: false })
+  completar(
+    @Param('id', ParseIdPipe) id: number,
+    @Body() dto: CompletarTurnoDto,
+    @Req() req: Request,
+  ) {
+    return this.turnosService.completar(id, dto, req.user as PublicUser);
   }
 
   /**

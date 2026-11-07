@@ -13,6 +13,7 @@ import { MarcasModule } from './marcas/marcas.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProfesionalesModule } from './profesionales/profesionales.module';
 import { ProveedoresModule } from './proveedores/proveedores.module';
+import { ReportesModule } from './reportes/reportes.module';
 import { SeriesModule } from './series/series.module';
 import { ServiciosModule } from './servicios/servicios.module';
 import { TurnosModule } from './turnos/turnos.module';
@@ -36,6 +37,8 @@ import { TurnosModule } from './turnos/turnos.module';
     // F13 suppliers and purchases.
     ProveedoresModule,
     ComprasModule,
+    // F12 cost and margin.
+    ReportesModule,
     // TP3, API 1: hair color try-on with YouCam.
     HairColorModule,
   ],

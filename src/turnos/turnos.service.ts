@@ -50,10 +50,12 @@ import {
 } from './agenda';
 import { AgendaQueryDto } from './dto/agenda-query.dto';
 import { CancelarTurnoDto } from './dto/cancelar-turno.dto';
+import { CompletarTurnoDto } from './dto/completar-turno.dto';
 import { CreateTurnoDto } from './dto/create-turno.dto';
 import { HorariosLibresDto } from './dto/horarios-libres.dto';
 import { RechazarTurnoDto } from './dto/rechazar-turno.dto';
 import { ReprogramarTurnoDto } from './dto/reprogramar-turno.dto';
+import { CostoDeDetalle, costoDe, costosPorDetalle } from './rentabilidad';
 
 const MAX_DIAS_AGENDA = 31;
 // A client can cancel a CONFIRMADO turno up to this many hours before it starts.
@@ -301,7 +303,7 @@ export class TurnosService {
   }
 
   // Read-only for the whole salon: one professional with legajo, everyone without it.
-  async agenda(query: AgendaQueryDto) {
+  async agenda(query: AgendaQueryDto, actor: PublicUser) {
     if (!esFechaValida(query.desde) || !esFechaValida(query.hasta)) {
       throw new BadRequestException('Las fechas no son válidas');
     }
@@ -328,7 +330,17 @@ export class TurnosService {
       orderBy: [{ fecha: 'asc' }, { horaInicio: 'asc' }],
       include: turnoInclude,
     });
-    return turnos.map((t) => this.formatear(t));
+    if (actor.rol !== Rol.ADMIN) {
+      return turnos.map((t) => this.formatear(t));
+    }
+    // Cost and margin are for the ADMIN only, and only once the turno is completed.
+    const completados = turnos
+      .filter((t) => t.estado === EstadoTurno.COMPLETADO)
+      .flatMap((t) => t.detalles.map((d) => d.id));
+    const costos = await costosPorDetalle(this.prisma, {
+      id: { in: completados },
+    });
+    return turnos.map((t) => this.formatear(t, { costos }));
   }
 
   async aceptar(id: number, actor: PublicUser) {
@@ -582,7 +594,7 @@ export class TurnosService {
     }
   }
 
-  async completar(id: number, actor: PublicUser) {
+  async completar(id: number, dto: CompletarTurnoDto, actor: PublicUser) {
     const turno = await this.findParaGestionar(id, actor);
     if (turno.estado !== EstadoTurno.CONFIRMADO) {
       throw new BadRequestException(
@@ -594,6 +606,19 @@ export class TurnosService {
         'El turno todavía no empezó: se completa desde su hora de inicio',
       );
     }
+    // What was charged for each service (PWA-220): the ones not sent are charged at precioBase.
+    // The ids of a turno's services never change, so the turno read above is enough to check them.
+    const cobrado = new Map(
+      (dto.detalles ?? []).map((p) => [p.turnoDetalleId, p.precioFinal]),
+    );
+    const ajenos = [...cobrado.keys()].filter(
+      (detalleId) => !turno.detalles.some((d) => d.id === detalleId),
+    );
+    if (ajenos.length) {
+      throw new BadRequestException(
+        `Estos servicios no son de este turno: ${ajenos.join(', ')}`,
+      );
+    }
     // The technical records of the turno are closed together with it, and their supplies with an
     // item are discounted from the stock (PWA-176). Without stock it is discounted anyway (decided
     // 31/10) and sinStock tells which items went below 0.
@@ -602,7 +627,11 @@ export class TurnosService {
         // Only if it's still CONFIRMADO: two "complete" at the same time can't discount twice.
         const { count } = await tx.turno.updateMany({
           where: { id, estado: EstadoTurno.CONFIRMADO },
-          data: { estado: EstadoTurno.COMPLETADO },
+          data: {
+            estado: EstadoTurno.COMPLETADO,
+            // Only if sent: otherwise it keeps the one chosen when booking.
+            ...(dto.metodoPago ? { metodoPago: dto.metodoPago } : {}),
+          },
         });
         if (!count) {
           throw new BadRequestException(
@@ -617,7 +646,19 @@ export class TurnosService {
           where: { turnoDetalle: { turnoId: id }, fechaBaja: null },
           select: { id: true },
         });
-        return this.consumoService.ajustar(tx, fichas);
+        const consumo = await this.consumoService.ajustar(tx, fichas);
+        // After the discount and with updateMany (no SELECT): a read before the fichas' UPDATE
+        // would fix the transaction's snapshot before it waits for a record being edited, and
+        // ajustar would then read the old formulas.
+        for (const detalle of turno.detalles) {
+          await tx.turnoDetalle.updateMany({
+            where: { id: detalle.id },
+            data: {
+              precioFinal: cobrado.get(detalle.id) ?? detalle.precioBase,
+            },
+          });
+        }
+        return consumo;
       },
       // Like a manual movement: it may wait for other movements of the same items.
       { maxWait: 10_000, timeout: 10_000 },
@@ -1197,10 +1238,28 @@ export class TurnosService {
   }
 
   // Each service with its own time range (they are done one after another).
+  // With `costos` (ADMIN agenda), each service of a completed turno adds its cost and margin.
   private formatear(
     turno: TurnoCompleto,
-    opciones: { paraCliente?: boolean } = {},
+    opciones: {
+      paraCliente?: boolean;
+      costos?: Map<number, CostoDeDetalle>;
+    } = {},
   ) {
+    const { costos } = opciones;
+    const completado = turno.estado === EstadoTurno.COMPLETADO;
+    const rentabilidadDe = (d: TurnoCompleto['detalles'][number]) => {
+      if (!completado || !costos) {
+        return { costo: null, margen: null, costoIncompleto: null };
+      }
+      const c = costoDe(costos, d.id);
+      const cobrado = d.precioFinal ?? d.precioBase;
+      return {
+        costo: c.costo,
+        margen: cobrado.minus(c.costo),
+        costoIncompleto: c.costoIncompleto,
+      };
+    };
     const detalles = tramosDeDetalles(turno.horaInicio, turno.detalles).map(
       ({ detalle: d, inicio, fin }) => ({
         id: d.id,
@@ -1211,8 +1270,11 @@ export class TurnosService {
         horaInicio: aHora(inicio),
         horaFin: aHora(fin),
         precioBase: d.precioBase,
+        // What was charged, set when the turno is completed (null until then).
+        precioFinal: d.precioFinal,
         // Salon only: the client sees her records in GET /fichas/mias.
         ...(opciones.paraCliente ? {} : { fichaId: d.fichas[0]?.id ?? null }),
+        ...(costos ? rentabilidadDe(d) : {}),
       }),
     );
     const { usuario, alergia, alergias } = turno.cliente;
@@ -1243,7 +1305,25 @@ export class TurnosService {
         emailVerificadoEn: usuario.emailVerificadoEn,
       },
       detalles,
+      ...(costos ? { rentabilidad: this.totalDe(turno, costos) } : {}),
     };
+  }
+
+  // Totals of a completed turno (null otherwise): charged, material cost and margin.
+  private totalDe(turno: TurnoCompleto, costos: Map<number, CostoDeDetalle>) {
+    if (turno.estado !== EstadoTurno.COMPLETADO) {
+      return null;
+    }
+    let cobrado = new Prisma.Decimal(0);
+    let costo = new Prisma.Decimal(0);
+    let costoIncompleto = false;
+    for (const d of turno.detalles) {
+      const c = costoDe(costos, d.id);
+      cobrado = cobrado.plus(d.precioFinal ?? d.precioBase);
+      costo = costo.plus(c.costo);
+      costoIncompleto ||= c.costoIncompleto;
+    }
+    return { cobrado, costo, margen: cobrado.minus(costo), costoIncompleto };
   }
 
   private contenidoBase(turno: TurnoCompleto) {
