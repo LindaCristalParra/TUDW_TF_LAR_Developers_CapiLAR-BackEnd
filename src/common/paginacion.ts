@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
 
@@ -9,8 +10,16 @@ const MAX_PAGINA = 1_000_000;
 
 // Query string of a paginated list (?pagina=2&porPagina=50); extend it to add filters.
 // Decorators run bottom-up (see stopAtFirstError in main.ts).
+// @ApiPropertyOptional by hand: the Swagger plugin only reads *.dto.ts files, so without it the lists
+// didn't show these two parameters.
 export class PaginacionQueryDto {
-  /** Desde 1. Por defecto 1, máximo 1.000.000. */
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    maximum: MAX_PAGINA,
+    default: 1,
+    description: 'Desde 1. Por defecto 1, máximo 1.000.000.',
+  })
   @Max(MAX_PAGINA, { message: 'La página no puede ser mayor a 1.000.000' })
   @Min(1, { message: 'La página debe ser 1 o más' })
   @IsInt({ message: 'La página debe ser un número entero' })
@@ -18,7 +27,13 @@ export class PaginacionQueryDto {
   @IsOptional()
   pagina?: number;
 
-  /** Por defecto 50, máximo 200. */
+  @ApiPropertyOptional({
+    type: Number,
+    minimum: 1,
+    maximum: MAX_POR_PAGINA,
+    default: POR_PAGINA,
+    description: 'Por defecto 50, máximo 200.',
+  })
   @Max(MAX_POR_PAGINA, {
     message: `No se pueden pedir más de ${MAX_POR_PAGINA} por página`,
   })

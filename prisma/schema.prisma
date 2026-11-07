@@ -495,7 +495,7 @@ model Remito {
   tipo           TipoRemito
   estado         EstadoRemito
   numComprobante String?      @db.VarChar(30)
-  // The supplier of a COMPRA. No relation yet: the Proveedor table comes with F13.
+  // The supplier of a COMPRA (required there, checked in the service). null for the other types.
   proveedorId    Int?
   // Who registered it (usuarioId instead of the DER's profesionalId: an ADMIN may not be a professional).
   usuarioId      Int
@@ -504,13 +504,35 @@ model Remito {
   // CONSUMO: the record it belongs to (outside the DER). null for the other types.
   fichaId        Int?
 
-  usuario  Usuario         @relation(fields: [usuarioId], references: [id])
-  // Restrict, not the SetNull Prisma uses by default on optional relations: records are only deactivated.
-  ficha    FichaTecnica?   @relation(fields: [fichaId], references: [id], onDelete: Restrict)
-  detalles RemitoDetalle[]
+  usuario   Usuario         @relation(fields: [usuarioId], references: [id])
+  // Restrict, not the SetNull Prisma uses by default on optional relations: records and suppliers
+  // are only deactivated.
+  ficha     FichaTecnica?   @relation(fields: [fichaId], references: [id], onDelete: Restrict)
+  proveedor Proveedor?      @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  detalles  RemitoDetalle[]
 
   @@index([usuarioId])
   @@index([fichaId])
+  // Also finds a supplier's repeated numComprobante (unique per supplier among the non-ANULADO ones,
+  // checked in code: a unique index can't leave the cancelled ones out).
+  @@index([proveedorId, numComprobante])
+}
+
+// A supplier (F13). Not linked to brands (decided 07/11): what was bought from it comes from its
+// purchases. Logical delete: an inactive supplier keeps its purchases but takes no new ones.
+model Proveedor {
+  id                     Int       @id @default(autoincrement())
+  // Digits only, no dashes (e.g. 30712345678), with a valid check digit.
+  cuit                   String    @unique @db.Char(11)
+  razonSocial            String    @db.VarChar(150)
+  telefono               String?   @db.VarChar(30)
+  email                  String?   @db.VarChar(191)
+  // Free text (e.g. "30 días, 5% por pago contado").
+  condicionesComerciales String?   @db.VarChar(500)
+  fechaAlta              DateTime  @default(now())
+  fechaBaja              DateTime?
+
+  remitos Remito[]
 }
 
 model RemitoDetalle {

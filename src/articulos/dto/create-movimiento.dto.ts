@@ -13,7 +13,7 @@ import { Trim } from '../../auth/dto/trim.decorator';
 import { TipoRemito } from '../../generated/prisma/client';
 import { MAX_DECIMAL_10_3 } from './create-articulo.dto';
 
-// COMPRA comes with suppliers (F13).
+// A COMPRA is loaded through /compras (F13), and a CONSUMO by the records.
 export const TIPOS_MOVIMIENTO = [
   TipoRemito.INGRESO,
   TipoRemito.EGRESO,
