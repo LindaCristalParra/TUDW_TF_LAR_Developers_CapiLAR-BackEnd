@@ -168,6 +168,7 @@ export class TurnosController {
    */
   @Patch(':id/cancelar')
   @Roles(Rol.CLIENTE, Rol.PROFESIONAL)
+  @ApiBody({ type: CancelarTurnoDto, required: false })
   cancelar(
     @Param('id', ParseIdPipe) id: number,
     @Body() dto: CancelarTurnoDto,
