@@ -77,16 +77,19 @@ export class ArticulosController {
   }
 
   /**
-   * Crear un artículo (solo ADMIN)
+   * Crear un artículo (ADMIN o PROFESIONAL)
    *
-   * @remarks El back genera el texto del QR (`qr`, ej. "ART-7K2M9QXP"); el front
+   * @remarks El PROFESIONAL puede crearlo para usar un producto nuevo sin esperar
+   * al ADMIN; editarlo, darlo de baja o de alta sigue siendo solo del ADMIN.
+   * El back genera el texto del QR (`qr`, ej. "ART-7K2M9QXP"); el front
    * arma la imagen. `stock` es el stock inicial: si es mayor a 0 queda como
    * primer movimiento (INGRESO "Stock inicial" de quien lo crea); después cambia
-   * con los movimientos. `precioVenta` es obligatorio para uso VENTA o AMBOS y no
-   * va en SALON. 400 si la marca no existe.
+   * con los movimientos. `precioCosto` es obligatorio también para el
+   * PROFESIONAL (lo usa el costo de los turnos). `precioVenta` es obligatorio
+   * para uso VENTA o AMBOS y no va en SALON. 400 si la marca no existe.
    */
   @Post()
-  @Roles(Rol.ADMIN)
+  @Roles(Rol.ADMIN, Rol.PROFESIONAL)
   create(@Body() dto: CreateArticuloDto, @Req() req: Request) {
     return this.articulosService.create(dto, (req.user as PublicUser).id);
   }

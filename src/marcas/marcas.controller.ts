@@ -39,12 +39,14 @@ export class MarcasController {
   }
 
   /**
-   * Crear una marca (solo ADMIN)
+   * Crear una marca (ADMIN o PROFESIONAL)
    *
-   * @remarks 409 si ya existe esa razón social con esa línea (sin distinguir mayúsculas).
+   * @remarks El PROFESIONAL puede crearla para cargar un artículo de una marca
+   * nueva; modificarla o borrarla sigue siendo solo del ADMIN. 409 si ya existe
+   * esa razón social con esa línea (sin distinguir mayúsculas).
    */
   @Post()
-  @Roles(Rol.ADMIN)
+  @Roles(Rol.ADMIN, Rol.PROFESIONAL)
   create(@Body() dto: CreateMarcaDto) {
     return this.marcasService.create(dto);
   }
