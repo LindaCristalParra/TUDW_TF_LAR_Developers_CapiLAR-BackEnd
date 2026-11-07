@@ -87,8 +87,8 @@ export class TurnosController {
    */
   @Get('agenda')
   @Roles(Rol.PROFESIONAL, Rol.ADMIN)
-  agenda(@Query() query: AgendaQueryDto) {
-    return this.turnosService.agenda(query);
+  agenda(@Query() query: AgendaQueryDto, @Req() req: Request) {
+    return this.turnosService.agenda(query, req.user as PublicUser);
   }
 
   /**

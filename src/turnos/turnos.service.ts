@@ -55,6 +55,7 @@ import { CreateTurnoDto } from './dto/create-turno.dto';
 import { HorariosLibresDto } from './dto/horarios-libres.dto';
 import { RechazarTurnoDto } from './dto/rechazar-turno.dto';
 import { ReprogramarTurnoDto } from './dto/reprogramar-turno.dto';
+import { CostoDeDetalle, costosPorDetalle } from './rentabilidad';
 
 const MAX_DIAS_AGENDA = 31;
 // A client can cancel a CONFIRMADO turno up to this many hours before it starts.
@@ -302,7 +303,7 @@ export class TurnosService {
   }
 
   // Read-only for the whole salon: one professional with legajo, everyone without it.
-  async agenda(query: AgendaQueryDto) {
+  async agenda(query: AgendaQueryDto, actor: PublicUser) {
     if (!esFechaValida(query.desde) || !esFechaValida(query.hasta)) {
       throw new BadRequestException('Las fechas no son válidas');
     }
@@ -329,7 +330,17 @@ export class TurnosService {
       orderBy: [{ fecha: 'asc' }, { horaInicio: 'asc' }],
       include: turnoInclude,
     });
-    return turnos.map((t) => this.formatear(t));
+    if (actor.rol !== Rol.ADMIN) {
+      return turnos.map((t) => this.formatear(t));
+    }
+    // Cost and margin are for the ADMIN only, and only once the turno is completed.
+    const costos = await costosPorDetalle(
+      this.prisma,
+      turnos
+        .filter((t) => t.estado === EstadoTurno.COMPLETADO)
+        .flatMap((t) => t.detalles.map((d) => d.id)),
+    );
+    return turnos.map((t) => this.formatear(t, { costos }));
   }
 
   async aceptar(id: number, actor: PublicUser) {
@@ -1227,10 +1238,28 @@ export class TurnosService {
   }
 
   // Each service with its own time range (they are done one after another).
+  // With `costos` (ADMIN agenda), each service of a completed turno adds its cost and margin.
   private formatear(
     turno: TurnoCompleto,
-    opciones: { paraCliente?: boolean } = {},
+    opciones: {
+      paraCliente?: boolean;
+      costos?: Map<number, CostoDeDetalle>;
+    } = {},
   ) {
+    const { costos } = opciones;
+    const completado = turno.estado === EstadoTurno.COMPLETADO;
+    const rentabilidadDe = (d: TurnoCompleto['detalles'][number]) => {
+      const c = completado ? costos?.get(d.id) : undefined;
+      if (!c) {
+        return { costo: null, margen: null, costoIncompleto: null };
+      }
+      const cobrado = d.precioFinal ?? d.precioBase;
+      return {
+        costo: c.costo,
+        margen: cobrado.minus(c.costo),
+        costoIncompleto: c.costoIncompleto,
+      };
+    };
     const detalles = tramosDeDetalles(turno.horaInicio, turno.detalles).map(
       ({ detalle: d, inicio, fin }) => ({
         id: d.id,
@@ -1245,6 +1274,7 @@ export class TurnosService {
         precioFinal: d.precioFinal,
         // Salon only: the client sees her records in GET /fichas/mias.
         ...(opciones.paraCliente ? {} : { fichaId: d.fichas[0]?.id ?? null }),
+        ...(costos ? rentabilidadDe(d) : {}),
       }),
     );
     const { usuario, alergia, alergias } = turno.cliente;
@@ -1275,7 +1305,25 @@ export class TurnosService {
         emailVerificadoEn: usuario.emailVerificadoEn,
       },
       detalles,
+      ...(costos ? { rentabilidad: this.totalDe(turno, costos) } : {}),
     };
+  }
+
+  // Totals of a completed turno (null otherwise): charged, material cost and margin.
+  private totalDe(turno: TurnoCompleto, costos: Map<number, CostoDeDetalle>) {
+    if (turno.estado !== EstadoTurno.COMPLETADO) {
+      return null;
+    }
+    let cobrado = new Prisma.Decimal(0);
+    let costo = new Prisma.Decimal(0);
+    let costoIncompleto = false;
+    for (const d of turno.detalles) {
+      const c = costos.get(d.id);
+      cobrado = cobrado.plus(d.precioFinal ?? d.precioBase);
+      costo = costo.plus(c?.costo ?? 0);
+      costoIncompleto ||= c?.costoIncompleto ?? false;
+    }
+    return { cobrado, costo, margen: cobrado.minus(costo), costoIncompleto };
   }
 
   private contenidoBase(turno: TurnoCompleto) {
