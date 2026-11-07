@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -120,6 +121,8 @@ export class ArticulosService {
 
   // The initial stock is the item's first movement (an INGRESO by whoever creates it), written in
   // the same nested create, so the history always adds up to the stock.
+  // An ADMIN or a PROFESIONAL creates it with the same body, prices included (decided 07/11, PWA-264):
+  // the professional uses a new product without waiting, and the ADMIN fixes a price with PATCH.
   async create(dto: CreateArticuloDto, usuarioId: number) {
     this.assertPrecioVenta(dto.uso, dto.precioVenta);
     await this.assertMarcaExiste(dto.marcaId);
@@ -134,10 +137,17 @@ export class ArticulosService {
     // The QR is random: on the (very unlikely) clash with another item, try a new one.
     for (let intento = 1; ; intento++) {
       try {
-        const articulo = await this.prisma.articulo.create({
-          data: { ...data, qr: nuevoQr() },
-          include: articuloInclude,
-        });
+        const articulo = await this.prisma.$transaction(
+          async (tx) => {
+            await this.assertNombreLibre(tx, dto.marcaId, dto.nombre);
+            return tx.articulo.create({
+              data: { ...data, qr: nuevoQr() },
+              include: articuloInclude,
+            });
+          },
+          // It may wait for another create or edit in the same brand.
+          { maxWait: 10_000, timeout: 10_000 },
+        );
         return this.formatear(articulo);
       } catch (error) {
         // The brand was deleted between the check and the insert.
@@ -176,6 +186,15 @@ export class ArticulosService {
       const { articulo, antes } = await this.prisma.$transaction(
         async (tx) => {
           const antes = await this.minimoBloqueado(tx, id);
+          // Read from the locked row: a concurrent edit may have changed the name or brand.
+          if (dto.nombre !== undefined || dto.marcaId !== undefined) {
+            await this.assertNombreLibre(
+              tx,
+              dto.marcaId ?? antes.marcaId,
+              dto.nombre ?? antes.nombre,
+              id,
+            );
+          }
           await tx.articulo.update({ where: { id }, data });
           // In another unit pesoActual means nothing: the open container is finished (decided 01/11).
           if (dto.tipoPeso !== undefined) {
@@ -223,16 +242,35 @@ export class ArticulosService {
     });
   }
 
+  // 409 if, while it was inactive, another active item took its name in its brand.
   async reactivate(id: number) {
-    const articulo = await this.findOrFail(id);
-    if (articulo.fechaBaja === null) {
-      throw new BadRequestException('El artículo ya está activo');
-    }
-    const actualizado = await this.prisma.articulo.update({
-      where: { id },
-      data: { fechaBaja: null },
-      include: articuloInclude,
-    });
+    const actualizado = await this.prisma.$transaction(
+      async (tx) => {
+        const filas = await tx.$queryRaw<
+          { marcaId: number; nombre: string; activo: number }[]
+        >`
+          SELECT marcaId, nombre, fechaBaja IS NULL AS activo
+          FROM Articulo WHERE id = ${id} FOR UPDATE`;
+        if (!filas[0]) {
+          throw new NotFoundException('Artículo no encontrado');
+        }
+        if (Number(filas[0].activo)) {
+          throw new BadRequestException('El artículo ya está activo');
+        }
+        await this.assertNombreLibre(
+          tx,
+          Number(filas[0].marcaId),
+          filas[0].nombre,
+          id,
+        );
+        return tx.articulo.update({
+          where: { id },
+          data: { fechaBaja: null },
+          include: articuloInclude,
+        });
+      },
+      { maxWait: 10_000, timeout: 10_000 },
+    );
     return this.formatear(actualizado);
   }
 
@@ -272,14 +310,21 @@ export class ArticulosService {
   // Locks the item's row until the transaction ends, like a movement or a record's consumption: the
   // stock compared with the new minimum can't change in between, and opening or updating the container
   // (which lock it too) can't slip in with the old unit or content.
+  // Also returns the name and brand, for the duplicate check.
   private async minimoBloqueado(
     tx: Prisma.TransactionClient,
     id: number,
-  ): Promise<EstadoStock> {
+  ): Promise<EstadoStock & { marcaId: number; nombre: string }> {
     const filas = await tx.$queryRaw<
-      { stock: string; stockMinAlert: string }[]
+      {
+        stock: string;
+        stockMinAlert: string;
+        marcaId: number;
+        nombre: string;
+      }[]
     >`
-      SELECT CAST(stock AS CHAR) AS stock, CAST(stockMinAlert AS CHAR) AS stockMinAlert
+      SELECT CAST(stock AS CHAR) AS stock, CAST(stockMinAlert AS CHAR) AS stockMinAlert,
+        marcaId, nombre
       FROM Articulo WHERE id = ${id} FOR UPDATE`;
     if (!filas[0]) {
       throw new NotFoundException('Artículo no encontrado');
@@ -287,7 +332,46 @@ export class ArticulosService {
     return {
       stock: new Prisma.Decimal(filas[0].stock),
       stockMinAlert: new Prisma.Decimal(filas[0].stockMinAlert),
+      marcaId: Number(filas[0].marcaId),
+      nombre: filas[0].nombre,
     };
+  }
+
+  // No two active items with the same name in the same brand (decided 07/11, PWA-264): 409. The
+  // collation already ignores case and accents; an inactive one doesn't count.
+  // Locking the brand's row makes two creates or edits into the same brand wait for each other, so
+  // both can't pass the check. The articles themselves are not locked here (only the one being
+  // edited, by its caller): a locking read over the brand's items would lock all of them and could
+  // deadlock with edits of other items. So the check is a plain read, and it must be the first one
+  // of the transaction: under REPEATABLE READ the first plain read fixes the snapshot, and it has to
+  // be taken after the brand lock, or it wouldn't see the item the other request just committed.
+  // Callers only take locks (FOR UPDATE) before calling this. Order: the item, then the brand.
+  private async assertNombreLibre(
+    tx: Prisma.TransactionClient,
+    marcaId: number,
+    nombre: string,
+    exceptoId?: number,
+  ): Promise<void> {
+    const marca = await tx.$queryRaw<{ id: number }[]>`
+      SELECT id FROM Marca WHERE id = ${marcaId} FOR UPDATE`;
+    // Deleted between the check before the transaction and here.
+    if (!marca[0]) {
+      throw new BadRequestException('La marca no existe');
+    }
+    const otro = await tx.articulo.findFirst({
+      where: {
+        marcaId,
+        nombre,
+        fechaBaja: null,
+        id: exceptoId === undefined ? undefined : { not: exceptoId },
+      },
+      select: { id: true },
+    });
+    if (otro) {
+      throw new ConflictException(
+        `Ya hay un artículo activo con ese nombre en esa marca (id ${otro.id})`,
+      );
+    }
   }
 
   private async findOrFail(id: number): Promise<ArticuloConMarca> {
