@@ -77,16 +77,22 @@ export class ArticulosController {
   }
 
   /**
-   * Crear un artículo (solo ADMIN)
+   * Crear un artículo (ADMIN o PROFESIONAL)
    *
-   * @remarks El back genera el texto del QR (`qr`, ej. "ART-7K2M9QXP"); el front
+   * @remarks El PROFESIONAL puede crearlo para usar un producto nuevo sin esperar
+   * al ADMIN; editarlo, darlo de baja o de alta sigue siendo solo del ADMIN.
+   * El back genera el texto del QR (`qr`, ej. "ART-7K2M9QXP"); el front
    * arma la imagen. `stock` es el stock inicial: si es mayor a 0 queda como
    * primer movimiento (INGRESO "Stock inicial" de quien lo crea); después cambia
-   * con los movimientos. `precioVenta` es obligatorio para uso VENTA o AMBOS y no
-   * va en SALON. 400 si la marca no existe.
+   * con los movimientos. El PROFESIONAL manda lo mismo que el ADMIN, precios
+   * incluidos (decisión del salón; el ADMIN los corrige con PATCH): `precioCosto`
+   * es obligatorio para los dos (lo usa el costo de los turnos). `precioVenta` es
+   * obligatorio para uso VENTA o AMBOS y no va en SALON. 400 si la marca no
+   * existe; 409 si ya hay un artículo activo con ese nombre en esa marca (sin
+   * distinguir mayúsculas ni acentos; uno dado de baja no cuenta).
    */
   @Post()
-  @Roles(Rol.ADMIN)
+  @Roles(Rol.ADMIN, Rol.PROFESIONAL)
   create(@Body() dto: CreateArticuloDto, @Req() req: Request) {
     return this.articulosService.create(dto, (req.user as PublicUser).id);
   }
@@ -102,7 +108,8 @@ export class ArticulosController {
    * envase abierto al contenido nuevo. Si un `stockMinAlert` más alto deja el
    * stock en el mínimo o debajo, los ADMIN reciben el mail de stock mínimo
    * (como en los movimientos). 404 si no existe o está dado de baja; 400 si la
-   * marca no existe.
+   * marca no existe; 409 si el nombre o la marca nuevos lo dejan igual a otro
+   * artículo activo.
    */
   @Patch(':id')
   @Roles(Rol.ADMIN)
@@ -113,7 +120,8 @@ export class ArticulosController {
   /**
    * Dar de alta un artículo dado de baja (solo ADMIN)
    *
-   * @remarks 404 si no existe; 400 si ya está activo.
+   * @remarks 404 si no existe; 400 si ya está activo; 409 si mientras estaba de
+   * baja se cargó otro artículo activo con su nombre en su marca.
    */
   @Patch(':id/alta')
   @Roles(Rol.ADMIN)
