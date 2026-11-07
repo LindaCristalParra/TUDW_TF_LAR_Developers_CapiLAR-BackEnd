@@ -55,7 +55,7 @@ import { CreateTurnoDto } from './dto/create-turno.dto';
 import { HorariosLibresDto } from './dto/horarios-libres.dto';
 import { RechazarTurnoDto } from './dto/rechazar-turno.dto';
 import { ReprogramarTurnoDto } from './dto/reprogramar-turno.dto';
-import { CostoDeDetalle, costosPorDetalle } from './rentabilidad';
+import { CostoDeDetalle, costoDe, costosPorDetalle } from './rentabilidad';
 
 const MAX_DIAS_AGENDA = 31;
 // A client can cancel a CONFIRMADO turno up to this many hours before it starts.
@@ -334,12 +334,12 @@ export class TurnosService {
       return turnos.map((t) => this.formatear(t));
     }
     // Cost and margin are for the ADMIN only, and only once the turno is completed.
-    const costos = await costosPorDetalle(
-      this.prisma,
-      turnos
-        .filter((t) => t.estado === EstadoTurno.COMPLETADO)
-        .flatMap((t) => t.detalles.map((d) => d.id)),
-    );
+    const completados = turnos
+      .filter((t) => t.estado === EstadoTurno.COMPLETADO)
+      .flatMap((t) => t.detalles.map((d) => d.id));
+    const costos = await costosPorDetalle(this.prisma, {
+      id: { in: completados },
+    });
     return turnos.map((t) => this.formatear(t, { costos }));
   }
 
@@ -1249,10 +1249,10 @@ export class TurnosService {
     const { costos } = opciones;
     const completado = turno.estado === EstadoTurno.COMPLETADO;
     const rentabilidadDe = (d: TurnoCompleto['detalles'][number]) => {
-      const c = completado ? costos?.get(d.id) : undefined;
-      if (!c) {
+      if (!completado || !costos) {
         return { costo: null, margen: null, costoIncompleto: null };
       }
+      const c = costoDe(costos, d.id);
       const cobrado = d.precioFinal ?? d.precioBase;
       return {
         costo: c.costo,
@@ -1318,10 +1318,10 @@ export class TurnosService {
     let costo = new Prisma.Decimal(0);
     let costoIncompleto = false;
     for (const d of turno.detalles) {
-      const c = costos.get(d.id);
+      const c = costoDe(costos, d.id);
       cobrado = cobrado.plus(d.precioFinal ?? d.precioBase);
-      costo = costo.plus(c?.costo ?? 0);
-      costoIncompleto ||= c?.costoIncompleto ?? false;
+      costo = costo.plus(c.costo);
+      costoIncompleto ||= c.costoIncompleto;
     }
     return { cobrado, costo, margen: cobrado.minus(costo), costoIncompleto };
   }

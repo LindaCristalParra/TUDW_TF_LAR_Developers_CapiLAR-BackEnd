@@ -14,32 +14,36 @@ const SIN_COSTO: CostoDeDetalle = {
   costoIncompleto: false,
 };
 
-/** Cost of each service; a service without a record or supplies costs 0. */
+/** Cost of the services that match `detalles`. Read it with `costoDe`. */
 export async function costosPorDetalle(
   prisma: PrismaService,
-  detalleIds: number[],
+  detalles: Prisma.TurnoDetalleWhereInput,
 ): Promise<Map<number, CostoDeDetalle>> {
-  const costos = new Map(detalleIds.map((id) => [id, { ...SIN_COSTO }]));
-  if (!detalleIds.length) {
-    return costos;
-  }
   const insumos = await prisma.formulaInsumo.findMany({
     where: {
-      formula: {
-        ficha: { turnoDetalleId: { in: detalleIds }, fechaBaja: null },
-      },
+      formula: { ficha: { turnoDetalle: detalles, fechaBaja: null } },
     },
     select: {
       costoSubtotal: true,
       formula: { select: { ficha: { select: { turnoDetalleId: true } } } },
     },
   });
+  const costos = new Map<number, CostoDeDetalle>();
   for (const { costoSubtotal, formula } of insumos) {
-    const actual = costos.get(formula.ficha.turnoDetalleId)!;
-    costos.set(formula.ficha.turnoDetalleId, {
+    const id = formula.ficha.turnoDetalleId;
+    const actual = costoDe(costos, id);
+    costos.set(id, {
       costo: costoSubtotal ? actual.costo.plus(costoSubtotal) : actual.costo,
       costoIncompleto: actual.costoIncompleto || costoSubtotal === null,
     });
   }
   return costos;
+}
+
+/** A service without a record or supplies costs 0 (e.g. a haircut). */
+export function costoDe(
+  costos: Map<number, CostoDeDetalle>,
+  detalleId: number,
+): CostoDeDetalle {
+  return costos.get(detalleId) ?? SIN_COSTO;
 }
