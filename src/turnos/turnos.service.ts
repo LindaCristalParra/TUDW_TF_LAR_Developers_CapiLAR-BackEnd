@@ -36,6 +36,7 @@ import {
 } from '../mail/mail.service';
 import { ConsumoService } from '../fichas/consumo.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushService, TipoPush } from '../push/push.service';
 import { fechasDeSerie } from '../series/fechas-serie';
 import { PublicUser } from '../users/users.service';
 import { VerificacionEmailService } from '../users/verificacion-email.service';
@@ -133,6 +134,7 @@ export class TurnosService {
     private readonly whatsAppService: WhatsAppService,
     private readonly consumoService: ConsumoService,
     private readonly alertasStock: AlertasStockService,
+    private readonly pushService: PushService,
   ) {}
 
   // turnoId (rescheduling) and clienteId (booking for a client) are for professionals only.
@@ -238,6 +240,7 @@ export class TurnosService {
           'Tu pedido de turno ya está en manos del salón. Te avisamos por mail apenas lo confirmen.',
         boton: 'VER MIS TURNOS',
       });
+      this.pushAProfesionales(turno, 'TURNO_NUEVO', 'Nueva solicitud de turno');
       for (const profesional of this.profesionalesDe(turno)) {
         this.enviar(profesional.email, 'Nueva solicitud de turno', {
           ...this.contenidoBase(turno),
@@ -250,9 +253,11 @@ export class TurnosService {
         });
       }
     } else {
-      this.avisarConfirmado(turno);
+      // A push only when the salon booked it: she doesn't need one for what she just did (07/11).
+      this.avisarConfirmado(turno, { push: !esCliente });
       // Booked by the client and confirmed on the spot: the professionals learn it by mail.
       if (esCliente) {
+        this.pushAProfesionales(turno, 'TURNO_NUEVO', 'Tenés un turno nuevo');
         for (const profesional of this.profesionalesDe(turno)) {
           this.enviar(profesional.email, 'Tenés un turno nuevo', {
             ...this.contenidoBase(turno),
@@ -355,7 +360,7 @@ export class TurnosService {
       data: { estado: EstadoTurno.CONFIRMADO },
       include: turnoInclude,
     });
-    this.avisarConfirmado(actualizado);
+    this.avisarConfirmado(actualizado, { push: true });
     return this.formatear(actualizado);
   }
 
@@ -395,15 +400,20 @@ export class TurnosService {
     });
 
     // Friendly notice without the internal reason.
-    this.avisarCliente(actualizado, 'Sobre tu solicitud de turno', {
-      estilo: 'OTRO_HORARIO',
-      titulo: 'Busquemos otro horario',
-      mensaje: alternativas.length
-        ? 'No pudimos confirmar tu turno en ese horario, pero queremos atenderte. Elegí el que mejor te quede de estos y pedilo desde la app.'
-        : 'No pudimos confirmar tu turno en ese horario, pero queremos atenderte. Entrá a la app y elegí otro horario que te quede cómodo.',
-      alternativas,
-      boton: 'ELEGIR OTRO HORARIO',
-    });
+    this.avisarCliente(
+      actualizado,
+      'Sobre tu solicitud de turno',
+      {
+        estilo: 'OTRO_HORARIO',
+        titulo: 'Busquemos otro horario',
+        mensaje: alternativas.length
+          ? 'No pudimos confirmar tu turno en ese horario, pero queremos atenderte. Elegí el que mejor te quede de estos y pedilo desde la app.'
+          : 'No pudimos confirmar tu turno en ese horario, pero queremos atenderte. Entrá a la app y elegí otro horario que te quede cómodo.',
+        alternativas,
+        boton: 'ELEGIR OTRO HORARIO',
+      },
+      'TURNO_RECHAZADO',
+    );
     return this.formatear(actualizado);
   }
 
@@ -461,13 +471,18 @@ export class TurnosService {
       });
     });
 
-    this.avisarCliente(actualizado, 'Te proponemos un nuevo horario', {
-      estilo: 'REPROGRAMADO',
-      titulo: 'Te proponemos un nuevo horario',
-      mensaje:
-        'El salón necesitó mover tu turno. Este es el horario nuevo: entrá a la app para aceptarlo. Si no te queda cómodo, podés cancelarlo y pedir otro.',
-      boton: 'VER MI TURNO',
-    });
+    this.avisarCliente(
+      actualizado,
+      'Te proponemos un nuevo horario',
+      {
+        estilo: 'REPROGRAMADO',
+        titulo: 'Te proponemos un nuevo horario',
+        mensaje:
+          'El salón necesitó mover tu turno. Este es el horario nuevo: entrá a la app para aceptarlo. Si no te queda cómodo, podés cancelarlo y pedir otro.',
+        boton: 'VER MI TURNO',
+      },
+      'TURNO_REPROGRAMADO',
+    );
     return this.formatear(actualizado);
   }
 
@@ -483,7 +498,8 @@ export class TurnosService {
       data: { estado: EstadoTurno.CONFIRMADO },
       include: turnoInclude,
     });
-    this.avisarConfirmado(actualizado);
+    // She accepted it herself: email only (07/11).
+    this.avisarConfirmado(actualizado, { push: false });
     // The new time is final now: the professionals of the turno learn it by mail.
     const { nombre, apellido } = actualizado.cliente.usuario;
     for (const profesional of this.profesionalesDe(actualizado)) {
@@ -518,12 +534,17 @@ export class TurnosService {
       data: { estado: EstadoTurno.CANCELADO, motivo },
       include: turnoInclude,
     });
-    this.avisarCliente(actualizado, 'Tu turno fue cancelado', {
-      estilo: 'CANCELADO',
-      titulo: 'Tu turno fue cancelado',
-      mensaje: `Lamentamos avisarte que el salón tuvo que cancelar tu turno. Motivo: "${motivo}". Entrá a la app y elegí otro horario que te quede cómodo.`,
-      boton: 'PEDIR OTRO TURNO',
-    });
+    this.avisarCliente(
+      actualizado,
+      'Tu turno fue cancelado',
+      {
+        estilo: 'CANCELADO',
+        titulo: 'Tu turno fue cancelado',
+        mensaje: `Lamentamos avisarte que el salón tuvo que cancelar tu turno. Motivo: "${motivo}". Entrá a la app y elegí otro horario que te quede cómodo.`,
+        boton: 'PEDIR OTRO TURNO',
+      },
+      'TURNO_CANCELADO',
+    );
     // The other professionals of the turno also lose that slot from their agenda.
     for (const profesional of this.profesionalesDe(actualizado)) {
       if (profesional.email === actor.email) continue;
@@ -572,6 +593,7 @@ export class TurnosService {
     const titulo = tardia
       ? `Se canceló un turno con menos de ${HORAS_CANCELACION_CLIENTE} h de aviso`
       : 'Se canceló un turno';
+    this.pushAProfesionales(actualizado, 'TURNO_CANCELADO', titulo);
     for (const profesional of this.profesionalesDe(actualizado)) {
       this.enviar(profesional.email, titulo, {
         ...this.contenidoBase(actualizado),
@@ -748,6 +770,14 @@ export class TurnosService {
         (await this.recordarPorMail(turno, inicio))
       ) {
         enviados++;
+        // The push goes with the email: pushes aren't saved in Notificacion (07/11), so the
+        // email's row is what keeps it to once per turno time. A failed email is retried on the
+        // next run, and its push with it.
+        await this.pushService.enviarYEsperar([turno.cliente.usuario.id], {
+          titulo: '¿Nos vemos en tu turno?',
+          cuerpo: `${this.cuerpoPush(turno)}. Confirmá desde la app si venís.`,
+          data: { tipo: 'RECORDATORIO', turnoId: turno.id },
+        });
       }
       if (
         !yaEnviado(MedioNotificacion.WHATSAPP) &&
@@ -1230,7 +1260,10 @@ export class TurnosService {
   }
 
   private profesionalesDe(turno: TurnoCompleto) {
-    const vistos = new Map<number, { nombre: string; email: string }>();
+    const vistos = new Map<
+      number,
+      { id: number; nombre: string; email: string }
+    >();
     for (const d of turno.detalles) {
       vistos.set(d.profesionalId, d.profesional.usuario);
     }
@@ -1343,21 +1376,32 @@ export class TurnosService {
     };
   }
 
-  private avisarConfirmado(turno: TurnoCompleto): void {
-    this.avisarCliente(turno, 'Tu turno está confirmado', {
-      estilo: 'CONFIRMADO',
-      titulo: '¡Tu turno está confirmado!',
-      mensaje:
-        'Te esperamos en el salón. Si necesitás cambiarlo, podés hacerlo desde la app.',
-      boton: 'VER MI TURNO',
-    });
+  // push: true when the salon confirmed it; false when she did (booked or accepted the new time).
+  private avisarConfirmado(
+    turno: TurnoCompleto,
+    { push }: { push: boolean },
+  ): void {
+    this.avisarCliente(
+      turno,
+      'Tu turno está confirmado',
+      {
+        estilo: 'CONFIRMADO',
+        titulo: '¡Tu turno está confirmado!',
+        mensaje:
+          'Te esperamos en el salón. Si necesitás cambiarlo, podés hacerlo desde la app.',
+        boton: 'VER MI TURNO',
+      },
+      push ? 'TURNO_CONFIRMADO' : undefined,
+    );
   }
 
+  // With `push`, her phones also get it (PWA-265), titled like the email.
   private avisarCliente(
     turno: TurnoCompleto,
     asunto: string,
     texto: Pick<MailTurno, 'estilo' | 'titulo' | 'mensaje' | 'boton'> &
       Partial<Pick<MailTurno, 'alternativas'>>,
+    push?: TipoPush,
   ): void {
     const { usuario } = turno.cliente;
     this.enviar(usuario.email, asunto, {
@@ -1366,6 +1410,35 @@ export class TurnosService {
       ruta: '/mis-turnos',
       ...texto,
     });
+    if (push) {
+      this.pushService.avisar([usuario.id], {
+        titulo: texto.titulo,
+        cuerpo: this.cuerpoPush(turno),
+        data: { tipo: push, turnoId: turno.id },
+      });
+    }
+  }
+
+  // One push to all the professionals of the turno (PWA-265), with the client's name.
+  private pushAProfesionales(
+    turno: TurnoCompleto,
+    tipo: TipoPush,
+    titulo: string,
+  ): void {
+    const { nombre, apellido } = turno.cliente.usuario;
+    this.pushService.avisar(
+      this.profesionalesDe(turno).map((p) => p.id),
+      {
+        titulo,
+        cuerpo: `${nombre} ${apellido} · ${this.cuerpoPush(turno)}`,
+        data: { tipo, turnoId: turno.id },
+      },
+    );
+  }
+
+  /** "martes 10 de noviembre a las 10:00" */
+  private cuerpoPush(turno: TurnoCompleto): string {
+    return `${this.fechaLarga(dateAFecha(turno.fecha))} a las ${turno.horaInicio}`;
   }
 
   // Not awaited: a slow or failed email must not delay or break the request.
