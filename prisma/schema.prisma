@@ -249,12 +249,14 @@ model SerieTurno {
 
 // One row per service. Services run one after another in id order, each with its own professional.
 model TurnoDetalle {
-  id            Int     @id @default(autoincrement())
+  id            Int      @id @default(autoincrement())
   turnoId       Int
   profesionalId Int
   servicioId    Int
   // Price when booked, so later price changes don't alter past turnos.
-  precioBase    Decimal @db.Decimal(10, 2)
+  precioBase    Decimal  @db.Decimal(10, 2)
+  // Price charged when the turno is completed (PWA-220). Defaults to precioBase; null until then.
+  precioFinal   Decimal? @db.Decimal(10, 2)
 
   turno       Turno          @relation(fields: [turnoId], references: [id])
   profesional Profesional    @relation(fields: [profesionalId], references: [legajo])
