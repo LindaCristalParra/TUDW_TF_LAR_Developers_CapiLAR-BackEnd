@@ -11,6 +11,7 @@ import { HairColorModule } from './hair-color/hair-color.module';
 import { MarcasModule } from './marcas/marcas.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProfesionalesModule } from './profesionales/profesionales.module';
+import { ProveedoresModule } from './proveedores/proveedores.module';
 import { SeriesModule } from './series/series.module';
 import { ServiciosModule } from './servicios/servicios.module';
 import { TurnosModule } from './turnos/turnos.module';
@@ -31,6 +32,8 @@ import { TurnosModule } from './turnos/turnos.module';
     // F11 stock.
     MarcasModule,
     ArticulosModule,
+    // F13 suppliers and purchases.
+    ProveedoresModule,
     // TP3, API 1: hair color try-on with YouCam.
     HairColorModule,
   ],
