@@ -13,8 +13,9 @@ CREATE TABLE `Proveedor` (
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- The Proveedor table is new, so any proveedorId already stored points nowhere and would break the FK.
-UPDATE `Remito` SET `proveedorId` = NULL WHERE `proveedorId` IS NOT NULL;
+-- No code wrote Remito.proveedorId before this table existed. If a database has one anyway (loaded by
+-- hand), the ADD CONSTRAINT below fails on purpose instead of erasing it: whoever runs the migration
+-- decides what to do with those rows.
 
 -- CreateIndex
 CREATE INDEX `Remito_proveedorId_numComprobante_idx` ON `Remito`(`proveedorId`, `numComprobante`);
