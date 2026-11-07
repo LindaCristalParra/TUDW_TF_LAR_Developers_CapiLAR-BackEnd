@@ -23,6 +23,7 @@ import { PublicUser } from '../users/users.service';
 import { AccionTurnoDto, CancelarPorTokenDto } from './dto/accion-turno.dto';
 import { AgendaQueryDto } from './dto/agenda-query.dto';
 import { CancelarTurnoDto } from './dto/cancelar-turno.dto';
+import { CompletarTurnoDto } from './dto/completar-turno.dto';
 import { CreateTurnoDto } from './dto/create-turno.dto';
 import { HorariosLibresDto } from './dto/horarios-libres.dto';
 import { RechazarTurnoDto } from './dto/rechazar-turno.dto';
@@ -182,8 +183,12 @@ export class TurnosController {
    */
   @Patch(':id/completar')
   @Roles(Rol.PROFESIONAL)
-  completar(@Param('id', ParseIdPipe) id: number, @Req() req: Request) {
-    return this.turnosService.completar(id, req.user as PublicUser);
+  completar(
+    @Param('id', ParseIdPipe) id: number,
+    @Body() dto: CompletarTurnoDto,
+    @Req() req: Request,
+  ) {
+    return this.turnosService.completar(id, dto, req.user as PublicUser);
   }
 
   /**

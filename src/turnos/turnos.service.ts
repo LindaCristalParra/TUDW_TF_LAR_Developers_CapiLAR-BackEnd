@@ -50,6 +50,7 @@ import {
 } from './agenda';
 import { AgendaQueryDto } from './dto/agenda-query.dto';
 import { CancelarTurnoDto } from './dto/cancelar-turno.dto';
+import { CompletarTurnoDto } from './dto/completar-turno.dto';
 import { CreateTurnoDto } from './dto/create-turno.dto';
 import { HorariosLibresDto } from './dto/horarios-libres.dto';
 import { RechazarTurnoDto } from './dto/rechazar-turno.dto';
@@ -582,7 +583,7 @@ export class TurnosService {
     }
   }
 
-  async completar(id: number, actor: PublicUser) {
+  async completar(id: number, dto: CompletarTurnoDto, actor: PublicUser) {
     const turno = await this.findParaGestionar(id, actor);
     if (turno.estado !== EstadoTurno.CONFIRMADO) {
       throw new BadRequestException(
@@ -594,6 +595,19 @@ export class TurnosService {
         'El turno todavía no empezó: se completa desde su hora de inicio',
       );
     }
+    // What was charged for each service (PWA-220): the ones not sent are charged at precioBase.
+    // The ids of a turno's services never change, so the turno read above is enough to check them.
+    const cobrado = new Map(
+      (dto.detalles ?? []).map((p) => [p.turnoDetalleId, p.precioFinal]),
+    );
+    const ajenos = [...cobrado.keys()].filter(
+      (detalleId) => !turno.detalles.some((d) => d.id === detalleId),
+    );
+    if (ajenos.length) {
+      throw new BadRequestException(
+        `Estos servicios no son de este turno: ${ajenos.join(', ')}`,
+      );
+    }
     // The technical records of the turno are closed together with it, and their supplies with an
     // item are discounted from the stock (PWA-176). Without stock it is discounted anyway (decided
     // 31/10) and sinStock tells which items went below 0.
@@ -602,7 +616,11 @@ export class TurnosService {
         // Only if it's still CONFIRMADO: two "complete" at the same time can't discount twice.
         const { count } = await tx.turno.updateMany({
           where: { id, estado: EstadoTurno.CONFIRMADO },
-          data: { estado: EstadoTurno.COMPLETADO },
+          data: {
+            estado: EstadoTurno.COMPLETADO,
+            // Only if sent: otherwise it keeps the one chosen when booking.
+            ...(dto.metodoPago ? { metodoPago: dto.metodoPago } : {}),
+          },
         });
         if (!count) {
           throw new BadRequestException(
@@ -617,7 +635,19 @@ export class TurnosService {
           where: { turnoDetalle: { turnoId: id }, fechaBaja: null },
           select: { id: true },
         });
-        return this.consumoService.ajustar(tx, fichas);
+        const consumo = await this.consumoService.ajustar(tx, fichas);
+        // After the discount and with updateMany (no SELECT): a read before the fichas' UPDATE
+        // would fix the transaction's snapshot before it waits for a record being edited, and
+        // ajustar would then read the old formulas.
+        for (const detalle of turno.detalles) {
+          await tx.turnoDetalle.updateMany({
+            where: { id: detalle.id },
+            data: {
+              precioFinal: cobrado.get(detalle.id) ?? detalle.precioBase,
+            },
+          });
+        }
+        return consumo;
       },
       // Like a manual movement: it may wait for other movements of the same items.
       { maxWait: 10_000, timeout: 10_000 },
@@ -1211,6 +1241,8 @@ export class TurnosService {
         horaInicio: aHora(inicio),
         horaFin: aHora(fin),
         precioBase: d.precioBase,
+        // What was charged, set when the turno is completed (null until then).
+        precioFinal: d.precioFinal,
         // Salon only: the client sees her records in GET /fichas/mias.
         ...(opciones.paraCliente ? {} : { fichaId: d.fichas[0]?.id ?? null }),
       }),
