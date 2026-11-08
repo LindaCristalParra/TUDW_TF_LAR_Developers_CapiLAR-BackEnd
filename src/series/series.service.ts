@@ -419,6 +419,7 @@ export class SeriesService {
               servicioId: plan.servicioId,
               profesionalId: plan.legajo,
               precioBase: f.ctx.items[0].precio,
+              duracion: f.ctx.items[0].duracion,
             },
           },
         },

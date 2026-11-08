@@ -258,6 +258,9 @@ model TurnoDetalle {
   servicioId    Int
   // Price when booked, so later price changes don't alter past turnos.
   precioBase    Decimal  @db.Decimal(10, 2)
+  // Minutes, copied from the service when booked (PWA-268), so a later change to its duration
+  // doesn't move the turnos already booked. Rescheduling takes the service's current duration.
+  duracion      Int
   // Price charged when the turno is completed (PWA-220). Defaults to precioBase; null until then.
   precioFinal   Decimal? @db.Decimal(10, 2)
 

@@ -225,6 +225,7 @@ export class TurnosService {
               servicioId: item.servicioId,
               profesionalId: item.legajo,
               precioBase: item.precio,
+              duracion: item.duracion,
             })),
           },
         },
@@ -449,11 +450,14 @@ export class TurnosService {
         clienteId: turno.clienteId,
       });
       assertDisponible(ctx, dto.horaInicio);
+      // The rescheduled turno takes each service's current duration (decided 08/11, PWA-268);
+      // the price stays the one it was booked at.
       for (const [i, detalle] of turno.detalles.entries()) {
-        if (detalle.profesionalId !== items[i].legajo) {
+        const { legajo, duracion } = ctx.items[i];
+        if (detalle.profesionalId !== legajo || detalle.duracion !== duracion) {
           await tx.turnoDetalle.update({
             where: { id: detalle.id },
-            data: { profesionalId: items[i].legajo },
+            data: { profesionalId: legajo, duracion },
           });
         }
       }
