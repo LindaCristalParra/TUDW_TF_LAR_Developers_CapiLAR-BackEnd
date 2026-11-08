@@ -84,10 +84,7 @@ export class FichasService {
             // All the services, to know when this one starts.
             detalles: {
               orderBy: { id: 'asc' },
-              select: {
-                id: true,
-                servicio: { select: { tiempoDuracion: true } },
-              },
+              select: { id: true, duracion: true },
             },
           },
         },

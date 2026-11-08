@@ -441,7 +441,7 @@ export class SeriesService {
         detalles: {
           orderBy: { id: 'asc' },
           include: {
-            servicio: { select: { tipo: true, tiempoDuracion: true } },
+            servicio: { select: { tipo: true } },
             profesional: {
               select: {
                 usuario: {
