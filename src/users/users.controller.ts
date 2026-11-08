@@ -120,10 +120,15 @@ export class UsersController {
    * inicio de sesión. Desde ahí recibe push de sus turnos, además de los mails:
    * la profesional, los turnos nuevos y las cancelaciones de la clienta; la
    * clienta, el recordatorio y los cambios del salón (confirmado, rechazado,
-   * reprogramado, cancelado). Al cerrar sesión deja de recibirlos. Si el mismo
-   * celular estaba con otra cuenta, deja de llegarle a esa. 400 si el token no
-   * es de Expo; 401 si la sesión venció o el access token es anterior a esta
-   * ruta (refrescarlo y reintentar).
+   * reprogramado, cancelado). Lo que hace la clienta misma (reservar, aceptar
+   * un cambio de horario) no le manda push a ella. Cada push trae `title`,
+   * `body` (fecha y hora; a la profesional, también el nombre de la clienta) y
+   * `data: { tipo, turnoId }` para abrir el turno, con `tipo` TURNO_NUEVO,
+   * TURNO_CANCELADO, TURNO_CONFIRMADO, TURNO_RECHAZADO, TURNO_REPROGRAMADO o
+   * RECORDATORIO. Al cerrar sesión deja de recibirlos. Si el mismo celular
+   * estaba con otra cuenta, deja de llegarle a esa. 400 si el token no es de
+   * Expo; 401 si la sesión venció o el access token es anterior a esta ruta
+   * (refrescarlo y reintentar).
    */
   @Patch('me/push-token')
   async registrarPushToken(
