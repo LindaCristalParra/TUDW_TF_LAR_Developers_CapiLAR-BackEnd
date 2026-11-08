@@ -1,4 +1,6 @@
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { urlConCachePreparadas } from './database-url';
 
 // The adapter's connect() creates the driver's pool: capture what it receives instead of connecting.
@@ -19,9 +21,17 @@ interface OpcionesDriver {
   host: string;
   database: string;
 }
-const ConnectionOptions = jest.requireActual<
-  new (opts: string) => OpcionesDriver
->('mariadb/lib/config/connection-options');
+// Since mariadb 3.5 this file is ESM and the package's "exports" hides it, so neither Jest's
+// require nor the package name reach it: Node's own require loads it by path (require(esm),
+// Node >= 22.12).
+const requireDeNode = createRequire(path.join(process.cwd(), 'package.json'));
+const modulo = requireDeNode(
+  path.join(
+    process.cwd(),
+    'node_modules/mariadb/lib/config/connection-options.js',
+  ),
+) as { default: new (opts: string) => OpcionesDriver };
+const ConnectionOptions = modulo.default;
 
 const URL_BASE =
   'mysql://root:p%40ss%3Aw%2Frd@localhost:3306/capilar_db?allowPublicKeyRetrieval=true';
