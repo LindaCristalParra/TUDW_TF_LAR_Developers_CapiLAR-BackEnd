@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { CookieOptions, Request, Response } from 'express';
+import { Limite } from '../common/limites';
 import { PublicUser } from '../users/users.service';
 import { AuthService, Sesion } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -55,6 +56,7 @@ export class AuthController {
    */
   @Post('register')
   @Public()
+  @Limite('cuenta')
   @X_CLIENT
   async register(
     @Body() dto: RegisterDto,
@@ -76,6 +78,7 @@ export class AuthController {
    */
   @Post('login')
   @Public()
+  @Limite('cuenta')
   @HttpCode(HttpStatus.OK)
   @X_CLIENT
   async login(
@@ -141,6 +144,7 @@ export class AuthController {
    */
   @Post('forgot-password')
   @Public()
+  @Limite('mail')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     await this.authService.forgotPassword(dto.email);
@@ -158,6 +162,7 @@ export class AuthController {
    */
   @Post('reset-password')
   @Public()
+  @Limite('mail')
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.authService.resetPassword(dto);
@@ -173,6 +178,7 @@ export class AuthController {
    */
   @Post('verificar-email')
   @Public()
+  @Limite('token')
   @HttpCode(HttpStatus.OK)
   async verificarEmail(@Body() dto: VerificarEmailDto) {
     await this.authService.verificarEmail(dto.token);

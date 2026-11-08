@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../auth/roles.decorator';
+import { Limite } from '../common/limites';
 import type { ArchivoSubido } from '../fotos/fotos.service';
 import { SubirFotoInterceptor } from '../fotos/subir-foto.interceptor';
 import { Rol } from '../generated/prisma/client';
@@ -35,6 +36,7 @@ export class HairColorController {
    * Puede tardar hasta un minuto.
    */
   @Post('preview')
+  @Limite('youcam')
   @UseInterceptors(SubirFotoInterceptor)
   @ApiConsumes('multipart/form-data')
   @ApiBody({

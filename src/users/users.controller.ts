@@ -22,6 +22,7 @@ import { SubirFotoInterceptor } from '../fotos/subir-foto.interceptor';
 import { Rol } from '../generated/prisma/client';
 import { Roles } from '../auth/roles.decorator';
 import { SidActual } from '../auth/sid-actual.decorator';
+import { Limite } from '../common/limites';
 import { PushService } from '../push/push.service';
 import { ListClientesQueryDto } from './dto/list-clientes-query.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
@@ -100,6 +101,7 @@ export class UsersController {
    * de servir). 400 si el email ya está verificado.
    */
   @Post('me/verificar-email')
+  @Limite('mail')
   @HttpCode(HttpStatus.OK)
   async reenviarVerificacion(@Req() req: Request) {
     await this.usersService.reenviarVerificacion(req.user as PublicUser);
