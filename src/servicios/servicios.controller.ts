@@ -7,14 +7,11 @@ import {
   Patch,
   Post,
   UploadedFile,
-  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { ApiFoto } from '../fotos/api-foto.decorator';
 import type { ArchivoSubido } from '../fotos/fotos.service';
@@ -27,7 +24,6 @@ import { ServiciosService } from './servicios.service';
 // The /** */ comments on each route are the Swagger summary and description.
 @ApiTags('servicios')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('servicios')
 export class ServiciosController {
   constructor(private readonly serviciosService: ServiciosService) {}

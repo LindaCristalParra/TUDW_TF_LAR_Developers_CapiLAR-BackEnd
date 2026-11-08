@@ -8,13 +8,10 @@ import {
   Post,
   Query,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import type { PublicUser } from '../users/users.service';
@@ -26,7 +23,6 @@ import { UpdateArticuloDto } from './dto/update-articulo.dto';
 // The /** */ comments on each route are the Swagger summary and description.
 @ApiTags('articulos')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('articulos')
 export class ArticulosController {
   constructor(private readonly articulosService: ArticulosService) {}

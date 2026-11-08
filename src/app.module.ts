@@ -1,11 +1,14 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AlergiasModule } from './alergias/alergias.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ArticulosModule } from './articulos/articulos.module';
 import { AuthModule } from './auth/auth.module';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { RolesGuard } from './auth/roles.guard';
 import { validarEntorno } from './common/validar-entorno';
 import { ComprasModule } from './compras/compras.module';
 import { FichasModule } from './fichas/fichas.module';
@@ -45,6 +48,13 @@ import { TurnosModule } from './turnos/turnos.module';
     HairColorModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Every route needs a login unless it's marked @Public() (PWA-269): a new controller is
+    // protected without having to remember @UseGuards. In this order: the token loads req.user,
+    // then @Roles() checks it.
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
+  ],
 })
 export class AppModule {}

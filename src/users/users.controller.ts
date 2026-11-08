@@ -11,7 +11,6 @@ import {
   Query,
   Req,
   UploadedFile,
-  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
@@ -21,9 +20,7 @@ import { ApiFoto } from '../fotos/api-foto.decorator';
 import type { ArchivoSubido } from '../fotos/fotos.service';
 import { SubirFotoInterceptor } from '../fotos/subir-foto.interceptor';
 import { Rol } from '../generated/prisma/client';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { SidActual } from '../auth/sid-actual.decorator';
 import { PushService } from '../push/push.service';
 import { ListClientesQueryDto } from './dto/list-clientes-query.dto';
@@ -37,7 +34,6 @@ import { PublicUser, UsersService } from './users.service';
 // (introspectComments in nest-cli.json).
 @ApiTags('users')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('users')
 export class UsersController {
   constructor(

@@ -7,13 +7,10 @@ import {
   Post,
   Query,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import type { PublicUser } from '../users/users.service';
@@ -26,7 +23,6 @@ import { ListComprasQueryDto } from './dto/list-compras-query.dto';
 // Purchases are only for the ADMIN (decided 31/10: the ADMIN loads suppliers and purchases).
 @ApiTags('compras')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Rol.ADMIN)
 @Controller('compras')
 export class ComprasController {

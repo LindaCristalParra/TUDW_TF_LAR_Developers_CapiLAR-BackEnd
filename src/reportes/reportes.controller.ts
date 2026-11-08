@@ -1,8 +1,6 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { Rol } from '../generated/prisma/client';
 import { RentabilidadQueryDto } from './dto/rentabilidad-query.dto';
 import { ReportesService } from './reportes.service';
@@ -11,7 +9,6 @@ import { ReportesService } from './reportes.service';
 // Cost and margin are for the ADMIN only (PWA-220).
 @ApiTags('reportes')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Rol.ADMIN)
 @Controller('reportes')
 export class ReportesController {
