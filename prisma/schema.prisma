@@ -73,6 +73,9 @@ model Sesion {
   // Logout, reuse of an old token, password change or reset, or deactivation. null = active.
   revocadaEn DateTime?
   creadaEn   DateTime  @default(now())
+  // Expo push token of the phone that logged in (PWA-265), null if it didn't register one. Unique: the
+  // same phone with another account moves its token to the new session.
+  pushToken  String?   @unique @db.VarChar(255)
 
   usuario Usuario @relation(fields: [usuarioId], references: [id])
 
