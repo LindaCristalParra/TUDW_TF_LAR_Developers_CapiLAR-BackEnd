@@ -162,7 +162,7 @@ export class AuthController {
    */
   @Post('reset-password')
   @Public()
-  @Limite('mail')
+  @Limite('token')
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.authService.resetPassword(dto);

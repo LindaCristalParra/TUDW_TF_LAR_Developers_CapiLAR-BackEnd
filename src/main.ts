@@ -25,14 +25,12 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
 
   // Behind a proxy (deploy), the request limits count by the client's IP from X-Forwarded-For
-  // instead of the proxy's (PWA-269). A number is how many proxies to trust ("1" = the one in
-  // front); without it, X-Forwarded-For is ignored, so a client can't fake its IP.
+  // instead of the proxy's (PWA-269). It's how many proxies to trust ("1" = the one in front;
+  // validarEntorno only accepts 1 to 9); without it, X-Forwarded-For is ignored, so a client
+  // can't fake its IP.
   const trustProxy = configService.get<string>('TRUST_PROXY')?.trim();
   if (trustProxy) {
-    app.set(
-      'trust proxy',
-      /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy,
-    );
+    app.set('trust proxy', Number(trustProxy));
   }
 
   // Security headers (PWA-267), helmet's defaults with two changes:

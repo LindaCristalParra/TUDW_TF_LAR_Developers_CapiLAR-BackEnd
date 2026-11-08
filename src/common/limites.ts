@@ -52,14 +52,16 @@ const LIMITES: Record<
     mensaje: 'Hiciste demasiados intentos seguidos.',
     doc: 'Más de 5 pedidos por minuto desde la misma IP.',
   },
-  // Routes that send an email (or use the reset link), per IP.
+  // Routes that send an email, per IP. 5 and not 3 (decided 08/11): some room for a shared
+  // network, like the salon's wifi.
   mail: {
     ttl: minutes(15),
-    limit: 3,
+    limit: 5,
     mensaje: 'Hiciste demasiados pedidos seguidos.',
-    doc: 'Más de 3 pedidos cada 15 minutos desde la misma IP.',
+    doc: 'Más de 5 pedidos cada 15 minutos desde la misma IP.',
   },
-  // Public routes with a token from an email or WhatsApp, per IP.
+  // Public routes with a token from an email or WhatsApp (also the password reset link), per IP.
+  // The token can't be guessed: this only stops someone hammering them.
   token: {
     ttl: minutes(1),
     limit: 20,

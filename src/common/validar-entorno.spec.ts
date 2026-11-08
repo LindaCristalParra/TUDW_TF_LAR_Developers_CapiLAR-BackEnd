@@ -59,6 +59,65 @@ describe('validarEntorno', () => {
     expect(mensaje).toContain('randomBytes(48)');
   });
 
+  it.each(['WHATSAPP_API_URL', 'EXPO_PUSH_URL'])(
+    'accepts %s only on this machine, or empty',
+    (nombre) => {
+      const con = (valor: string) =>
+        error({ JWT_SECRET: BUENO, JWT_REFRESH_SECRET: OTRO, [nombre]: valor });
+      for (const local of [
+        'http://127.0.0.1:3991',
+        'http://localhost:3990/--/api/v2/push/send',
+        'https://[::1]:8443',
+        '',
+        '  ',
+      ]) {
+        expect(con(local)).toBeNull();
+      }
+      for (const ajena of [
+        'https://graph.facebook.com/v23.0',
+        'http://127.0.0.1.evil.test',
+        'http://10.0.0.5:3991',
+        'ftp://127.0.0.1',
+        'no es una url',
+      ]) {
+        expect(con(ajena)).toContain(`${nombre} es solo para pruebas`);
+      }
+    },
+  );
+
+  it('accepts TRUST_PROXY only as a number of proxies, or empty', () => {
+    const con = (valor: string) =>
+      error({
+        JWT_SECRET: BUENO,
+        JWT_REFRESH_SECRET: OTRO,
+        TRUST_PROXY: valor,
+      });
+    for (const bueno of ['1', '2', ' 1 ', '']) {
+      expect(con(bueno)).toBeNull();
+    }
+    for (const malo of [
+      'true',
+      '0',
+      '10',
+      '-1',
+      '1.5',
+      'loopback',
+      '10.0.0.0/8',
+    ]) {
+      expect(con(malo)).toContain('TRUST_PROXY tiene que ser');
+    }
+  });
+
+  it('leaves out the command to generate a secret when no secret is wrong', () => {
+    const mensaje = error({
+      JWT_SECRET: BUENO,
+      JWT_REFRESH_SECRET: OTRO,
+      TRUST_PROXY: 'true',
+    });
+    expect(mensaje).toContain('TRUST_PROXY');
+    expect(mensaje).not.toContain('randomBytes');
+  });
+
   it('never puts a secret in the message', () => {
     const secreto = 'z'.repeat(40);
     const mensaje = error({ JWT_SECRET: secreto, JWT_REFRESH_SECRET: secreto });
