@@ -21,9 +21,18 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
   const configService = app.get(ConfigService);
 
-  // Security headers (PWA-267). Cross-Origin-Resource-Policy is cross-origin, not helmet's
-  // same-origin: the web, on another origin, shows the profile and service photos in <img>.
-  app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+  // Security headers (PWA-267), helmet's defaults with two changes:
+  // - Cross-Origin-Resource-Policy cross-origin, not same-origin: the web, on another origin, shows
+  //   the profile and service photos in <img>.
+  // - No upgrade-insecure-requests in the CSP: it made Swagger UI ask for its files over HTTPS,
+  //   so it came up blank on a host served over plain HTTP (not localhost). HTTPS in production
+  //   is enforced by the server in front of the app and by HSTS, not by this directive.
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      contentSecurityPolicy: { directives: { upgradeInsecureRequests: null } },
+    }),
+  );
 
   // Closed list of allowed origins. Without it, cors() would accept any origin.
   const corsOrigins = configService
