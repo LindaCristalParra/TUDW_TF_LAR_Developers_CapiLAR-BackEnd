@@ -65,11 +65,21 @@ Create a `.env` file in the project root (it is git-ignored and must never be co
 
 ```env
 DATABASE_URL="mysql://root:password@localhost:3306/capilar_db?allowPublicKeyRetrieval=true"
-JWT_SECRET="a-long-random-string"
-JWT_EXPIRES_IN="1d"
+JWT_SECRET="<generated, see below>"
+JWT_REFRESH_SECRET="<generated, different from JWT_SECRET>"
+JWT_EXPIRES_IN="15m"
+SWAGGER=true
 ```
 
 See `.env.example` for the full list of variables. `allowPublicKeyRetrieval=true` is required so the MariaDB driver adapter can authenticate against MySQL 8 without SSL.
+
+The app doesn't start unless `JWT_SECRET` and `JWT_REFRESH_SECRET` have at least 32 characters, are different from each other, and aren't the `change-me` examples. Generate each one with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+Swagger (`/api`) is only served with `SWAGGER=true`. Leave it out on a real deploy.
 
 ### Database
 

@@ -6,6 +6,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ArticulosModule } from './articulos/articulos.module';
 import { AuthModule } from './auth/auth.module';
+import { validarEntorno } from './common/validar-entorno';
 import { ComprasModule } from './compras/compras.module';
 import { FichasModule } from './fichas/fichas.module';
 import { HairColorModule } from './hair-color/hair-color.module';
@@ -20,7 +21,8 @@ import { TurnosModule } from './turnos/turnos.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    // validate: weak or example secrets stop the app at startup (PWA-267).
+    ConfigModule.forRoot({ isGlobal: true, validate: validarEntorno }),
     // Scheduled jobs (@Cron): F06 reminders and F07 daily agenda.
     ScheduleModule.forRoot(),
     PrismaModule,
