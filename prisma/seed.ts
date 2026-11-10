@@ -15,6 +15,7 @@ import {
   UnidadInsumo,
   UsoArticulo,
 } from '../src/generated/prisma/client';
+import { normalizarTonalidad } from '../src/articulos/tonalidad';
 import { urlConCachePreparadas } from '../src/prisma/database-url';
 
 const BCRYPT_SALT_ROUNDS = 10;
@@ -499,6 +500,10 @@ async function seedStock(prisma: PrismaClient) {
             articulos: {
               create: articulos.map((articulo) => ({
                 ...articulo,
+                // Stored as ArticulosService stores it ("20 vol" → "20vol").
+                tonalidad: articulo.tonalidad
+                  ? normalizarTonalidad(articulo.tonalidad)
+                  : null,
                 precioVenta: precioVentaDePrueba(articulo),
                 qr: libres.pop()!,
                 remitoDetalles: stockInicial(articulo.stock),

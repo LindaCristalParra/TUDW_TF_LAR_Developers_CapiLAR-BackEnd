@@ -84,8 +84,11 @@ export class ArticulosController {
    * incluidos (decisión del salón; el ADMIN los corrige con PATCH): `precioCosto`
    * es obligatorio para los dos (lo usa el costo de los turnos). `precioVenta` es
    * obligatorio para uso VENTA o AMBOS y no va en SALON. 400 si la marca no
-   * existe; 409 si ya hay un artículo activo con ese nombre en esa marca (sin
-   * distinguir mayúsculas ni acentos; uno dado de baja no cuenta).
+   * existe; 409 si ya hay un artículo activo con el mismo nombre, marca y
+   * `tonalidad` (sin distinguir mayúsculas ni acentos; uno dado de baja no
+   * cuenta; dos sin tonalidad son iguales). La tonalidad se guarda normalizada
+   * (ver el campo), así que "7,1" choca con "7.1". El mensaje del 409 termina
+   * con el id del que ya existe: "… (id 12)".
    */
   @Post()
   @Roles(Rol.ADMIN, Rol.PROFESIONAL)
@@ -104,8 +107,8 @@ export class ArticulosController {
    * envase abierto al contenido nuevo. Si un `stockMinAlert` más alto deja el
    * stock en el mínimo o debajo, los ADMIN reciben el mail de stock mínimo
    * (como en los movimientos). 404 si no existe o está dado de baja; 400 si la
-   * marca no existe; 409 si el nombre o la marca nuevos lo dejan igual a otro
-   * artículo activo.
+   * marca no existe; 409 si el nombre, la marca o la tonalidad nuevos lo dejan
+   * igual a otro artículo activo (mismas reglas que al crear).
    */
   @Patch(':id')
   @Roles(Rol.ADMIN)
@@ -117,7 +120,7 @@ export class ArticulosController {
    * Dar de alta un artículo dado de baja (solo ADMIN)
    *
    * @remarks 404 si no existe; 400 si ya está activo; 409 si mientras estaba de
-   * baja se cargó otro artículo activo con su nombre en su marca.
+   * baja se cargó otro artículo activo con su nombre y su tonalidad en su marca.
    */
   @Patch(':id/alta')
   @Roles(Rol.ADMIN)
