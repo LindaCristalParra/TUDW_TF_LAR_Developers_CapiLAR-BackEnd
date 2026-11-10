@@ -24,6 +24,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateArticuloDto } from './dto/create-articulo.dto';
 import { ListArticulosQueryDto } from './dto/list-articulos-query.dto';
 import { UpdateArticuloDto } from './dto/update-articulo.dto';
+import { normalizarTonalidad } from './tonalidad';
 
 // envaseEnUso is null when no container is open.
 export const articuloInclude = {
@@ -139,7 +140,12 @@ export class ArticulosService {
       try {
         const articulo = await this.prisma.$transaction(
           async (tx) => {
-            await this.assertNombreLibre(tx, dto.marcaId, dto.nombre);
+            await this.assertNombreLibre(
+              tx,
+              dto.marcaId,
+              dto.nombre,
+              data.tonalidad ?? null,
+            );
             return tx.articulo.create({
               data: { ...data, qr: nuevoQr() },
               include: articuloInclude,
@@ -186,12 +192,18 @@ export class ArticulosService {
       const { articulo, antes } = await this.prisma.$transaction(
         async (tx) => {
           const antes = await this.minimoBloqueado(tx, id);
-          // Read from the locked row: a concurrent edit may have changed the name or brand.
-          if (dto.nombre !== undefined || dto.marcaId !== undefined) {
+          // Read from the locked row: a concurrent edit may have changed the name, brand or shade.
+          // Not `??` for the shade: null (cleared) must not fall back to the old one.
+          if (
+            dto.nombre !== undefined ||
+            dto.marcaId !== undefined ||
+            data.tonalidad !== undefined
+          ) {
             await this.assertNombreLibre(
               tx,
               dto.marcaId ?? antes.marcaId,
               dto.nombre ?? antes.nombre,
+              data.tonalidad === undefined ? antes.tonalidad : data.tonalidad,
               id,
             );
           }
@@ -242,14 +254,19 @@ export class ArticulosService {
     });
   }
 
-  // 409 if, while it was inactive, another active item took its name in its brand.
+  // 409 if, while it was inactive, another active item took its name and shade in its brand.
   async reactivate(id: number) {
     const actualizado = await this.prisma.$transaction(
       async (tx) => {
         const filas = await tx.$queryRaw<
-          { marcaId: number; nombre: string; activo: number }[]
+          {
+            marcaId: number;
+            nombre: string;
+            tonalidad: string | null;
+            activo: number;
+          }[]
         >`
-          SELECT marcaId, nombre, fechaBaja IS NULL AS activo
+          SELECT marcaId, nombre, tonalidad, fechaBaja IS NULL AS activo
           FROM Articulo WHERE id = ${id} FOR UPDATE`;
         if (!filas[0]) {
           throw new NotFoundException('Artículo no encontrado');
@@ -261,6 +278,7 @@ export class ArticulosService {
           tx,
           Number(filas[0].marcaId),
           filas[0].nombre,
+          filas[0].tonalidad,
           id,
         );
         return tx.articulo.update({
@@ -310,21 +328,24 @@ export class ArticulosService {
   // Locks the item's row until the transaction ends, like a movement or a record's consumption: the
   // stock compared with the new minimum can't change in between, and opening or updating the container
   // (which lock it too) can't slip in with the old unit or content.
-  // Also returns the name and brand, for the duplicate check.
+  // Also returns the name, brand and shade, for the duplicate check.
   private async minimoBloqueado(
     tx: Prisma.TransactionClient,
     id: number,
-  ): Promise<EstadoStock & { marcaId: number; nombre: string }> {
+  ): Promise<
+    EstadoStock & { marcaId: number; nombre: string; tonalidad: string | null }
+  > {
     const filas = await tx.$queryRaw<
       {
         stock: string;
         stockMinAlert: string;
         marcaId: number;
         nombre: string;
+        tonalidad: string | null;
       }[]
     >`
       SELECT CAST(stock AS CHAR) AS stock, CAST(stockMinAlert AS CHAR) AS stockMinAlert,
-        marcaId, nombre
+        marcaId, nombre, tonalidad
       FROM Articulo WHERE id = ${id} FOR UPDATE`;
     if (!filas[0]) {
       throw new NotFoundException('Artículo no encontrado');
@@ -334,11 +355,15 @@ export class ArticulosService {
       stockMinAlert: new Prisma.Decimal(filas[0].stockMinAlert),
       marcaId: Number(filas[0].marcaId),
       nombre: filas[0].nombre,
+      tonalidad: filas[0].tonalidad,
     };
   }
 
-  // No two active items with the same name in the same brand (decided 07/11, PWA-264): 409. The
-  // collation already ignores case and accents; an inactive one doesn't count.
+  // No two active items with the same name and shade in the same brand: 409 (decided 07/11, PWA-264;
+  // the shade since 10/11, PWA-279, so a dye can have one item per shade). Two without a shade are
+  // still duplicates (null matches null). The shade comes normalized (see normalizarTonalidad) and
+  // the collation already ignores case and accents; an inactive one doesn't count. The message ends
+  // with "(id N)": web and mobile read it to offer the existing item.
   // Locking the brand's row makes two creates or edits into the same brand wait for each other, so
   // both can't pass the check. The articles themselves are not locked here (only the one being
   // edited, by its caller): a locking read over the brand's items would lock all of them and could
@@ -350,6 +375,7 @@ export class ArticulosService {
     tx: Prisma.TransactionClient,
     marcaId: number,
     nombre: string,
+    tonalidad: string | null,
     exceptoId?: number,
   ): Promise<void> {
     const marca = await tx.$queryRaw<{ id: number }[]>`
@@ -362,6 +388,7 @@ export class ArticulosService {
       where: {
         marcaId,
         nombre,
+        tonalidad,
         fechaBaja: null,
         id: exceptoId === undefined ? undefined : { not: exceptoId },
       },
@@ -369,7 +396,7 @@ export class ArticulosService {
     });
     if (otro) {
       throw new ConflictException(
-        `Ya hay un artículo activo con ese nombre en esa marca (id ${otro.id})`,
+        `Ya hay un artículo activo con ese nombre, marca y tonalidad (id ${otro.id})`,
       );
     }
   }
@@ -405,13 +432,15 @@ export class ArticulosService {
       : { in: [uso, UsoArticulo.AMBOS] };
   }
 
-  // Optional texts: "" or null clears them; undefined leaves them as they are.
+  // Optional texts: "" or null clears them; undefined leaves them as they are. The shade is stored
+  // normalized (see normalizarTonalidad), so one that is only dots or spaces clears it too.
   private opcionales(dto: UpdateArticuloDto) {
     const limpiar = (valor?: string | null) =>
       valor === undefined ? undefined : valor || null;
+    const tonalidad = limpiar(dto.tonalidad);
     return {
       codigo: limpiar(dto.codigo),
-      tonalidad: limpiar(dto.tonalidad),
+      tonalidad: tonalidad ? normalizarTonalidad(tonalidad) : tonalidad,
     };
   }
 

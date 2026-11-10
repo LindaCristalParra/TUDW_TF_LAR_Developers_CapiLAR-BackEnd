@@ -121,7 +121,10 @@ export class CreateArticuloDto {
   tipoPeso: UnidadInsumo;
 
   /**
-   * Tono, para tinturas (opcional). `""` o `null` lo borra.
+   * Tono, para tinturas u oxidantes (opcional). `""` o `null` lo borra. Se
+   * guarda normalizado: `,` `-` y `/` pasan a `.`, se sacan todos los espacios
+   * y los puntos del final ("7,1" → "7.1", "20 vol" → "20vol"); si no queda
+   * nada, sin tonalidad. La respuesta trae cómo quedó guardado.
    * @example "7.1"
    */
   @MaxLength(50, { message: 'La tonalidad no puede superar los 50 caracteres' })
