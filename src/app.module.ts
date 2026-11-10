@@ -1,11 +1,16 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AlergiasModule } from './alergias/alergias.module';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ArticulosModule } from './articulos/articulos.module';
 import { AuthModule } from './auth/auth.module';
+import { JwtAuthGuard } from './auth/jwt-auth.guard';
+import { RolesGuard } from './auth/roles.guard';
+import { LimiteGuard, throttlers } from './common/limites';
 import { validarEntorno } from './common/validar-entorno';
 import { ComprasModule } from './compras/compras.module';
 import { FichasModule } from './fichas/fichas.module';
@@ -25,6 +30,8 @@ import { TurnosModule } from './turnos/turnos.module';
     ConfigModule.forRoot({ isGlobal: true, validate: validarEntorno }),
     // Scheduled jobs (@Cron): F06 reminders and F07 daily agenda.
     ScheduleModule.forRoot(),
+    // Request limits of the routes marked with @Limite() (PWA-269).
+    ThrottlerModule.forRoot({ throttlers }),
     PrismaModule,
     AuthModule,
     ServiciosModule,
@@ -45,6 +52,14 @@ import { TurnosModule } from './turnos/turnos.module';
     HairColorModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    // Every route needs a login unless it's marked @Public() (PWA-269): a new controller is
+    // protected without having to remember @UseGuards. In this order: the token loads req.user,
+    // then @Roles() checks it, then the limits count the request (YouCam's by req.user).
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: LimiteGuard },
+  ],
 })
 export class AppModule {}

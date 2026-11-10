@@ -1,16 +1,6 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Param,
-  Patch,
-  Post,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Delete, Param, Patch, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import { UpdateEnvaseEnUsoDto } from './dto/update-envase-en-uso.dto';
@@ -19,7 +9,6 @@ import { EnvaseEnUsoService } from './envase-en-uso.service';
 // The open container of an item. Both roles use it, like the stock movements (decided 31/10).
 @ApiTags('articulos')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Rol.ADMIN, Rol.PROFESIONAL)
 @Controller('articulos')
 export class EnvaseEnUsoController {

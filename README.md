@@ -81,6 +81,8 @@ node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
 
 Swagger (`/api`) is only served with `SWAGGER=true`. Leave it out on a real deploy.
 
+Some routes have a request limit and answer `429` with `Retry-After` once it's passed: login and sign-up (5 per minute per IP), the routes that send an email (5 per 15 minutes per IP), the public routes with a token from an email or WhatsApp, password reset included (20 per minute per IP), and the YouCam try-on (10 per hour per user). The limits are kept in memory, so they assume one instance of the app. Behind a proxy, set `TRUST_PROXY` to the number of proxies in front of the app (usually `1`); otherwise every request counts as coming from the proxy.
+
 ### Database
 
 Once the Prisma schema is set up, apply the migrations with:

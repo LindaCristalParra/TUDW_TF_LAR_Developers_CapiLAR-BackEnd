@@ -1,18 +1,7 @@
-import {
-  Body,
-  Controller,
-  Get,
-  Param,
-  Post,
-  Query,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { PaginacionQueryDto } from '../common/paginacion';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
@@ -23,7 +12,6 @@ import { MovimientosService } from './movimientos.service';
 // Stock movements of an item. ADMIN loads items, but both roles move stock (decided 31/10).
 @ApiTags('articulos')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Rol.ADMIN, Rol.PROFESIONAL)
 @Controller('articulos')
 export class MovimientosController {

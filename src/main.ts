@@ -1,6 +1,7 @@
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationError } from 'class-validator';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -18,8 +19,19 @@ function mensajes(errores: ValidationError[]): string[] {
 
 async function bootstrap() {
   // rawBody: the WhatsApp webhook checks Meta's signature over the exact bytes received.
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    rawBody: true,
+  });
   const configService = app.get(ConfigService);
+
+  // Behind a proxy (deploy), the request limits count by the client's IP from X-Forwarded-For
+  // instead of the proxy's (PWA-269). It's how many proxies to trust ("1" = the one in front;
+  // validarEntorno only accepts 1 to 9); without it, X-Forwarded-For is ignored, so a client
+  // can't fake its IP.
+  const trustProxy = configService.get<string>('TRUST_PROXY')?.trim();
+  if (trustProxy) {
+    app.set('trust proxy', Number(trustProxy));
+  }
 
   // Security headers (PWA-267), helmet's defaults with two changes:
   // - Cross-Origin-Resource-Policy cross-origin, not same-origin: the web, on another origin, shows

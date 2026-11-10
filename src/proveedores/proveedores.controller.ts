@@ -7,12 +7,9 @@ import {
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import { CreateProveedorDto } from './dto/create-proveedor.dto';
@@ -24,7 +21,6 @@ import { ProveedoresService } from './proveedores.service';
 // Suppliers are only for the ADMIN (decided 31/10: the ADMIN loads suppliers and purchases).
 @ApiTags('proveedores')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Rol.ADMIN)
 @Controller('proveedores')
 export class ProveedoresController {

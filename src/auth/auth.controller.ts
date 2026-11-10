@@ -8,10 +8,10 @@ import {
   Post,
   Req,
   Res,
-  UseGuards,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { CookieOptions, Request, Response } from 'express';
+import { Limite } from '../common/limites';
 import { PublicUser } from '../users/users.service';
 import { AuthService, Sesion } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -21,7 +21,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerificarEmailDto } from './dto/verificar-email.dto';
-import { JwtAuthGuard } from './jwt-auth.guard';
+import { Public } from './public.decorator';
 import { ApiBearerAuth, ApiHeader, ApiTags } from '@nestjs/swagger';
 
 const REFRESH_COOKIE = 'refreshToken';
@@ -55,6 +55,8 @@ export class AuthController {
    * alguna no existe o está dada de baja.
    */
   @Post('register')
+  @Public()
+  @Limite('cuenta')
   @X_CLIENT
   async register(
     @Body() dto: RegisterDto,
@@ -75,6 +77,8 @@ export class AuthController {
    * cuenta está dada de baja.
    */
   @Post('login')
+  @Public()
+  @Limite('cuenta')
   @HttpCode(HttpStatus.OK)
   @X_CLIENT
   async login(
@@ -94,6 +98,7 @@ export class AuthController {
    * otros dispositivos siguen). 401 si no hay sesión: hay que iniciar sesión de nuevo.
    */
   @Post('refresh')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @X_CLIENT
   async refresh(
@@ -118,6 +123,7 @@ export class AuthController {
    * Responde 200 aunque la sesión ya no exista.
    */
   @Post('logout')
+  @Public()
   @HttpCode(HttpStatus.OK)
   @X_CLIENT
   async logout(
@@ -137,6 +143,8 @@ export class AuthController {
    * Responde siempre lo mismo, exista o no el email.
    */
   @Post('forgot-password')
+  @Public()
+  @Limite('mail')
   @HttpCode(HttpStatus.OK)
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
     await this.authService.forgotPassword(dto.email);
@@ -153,6 +161,8 @@ export class AuthController {
    * usó o venció.
    */
   @Post('reset-password')
+  @Public()
+  @Limite('token')
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() dto: ResetPasswordDto) {
     await this.authService.resetPassword(dto);
@@ -167,6 +177,8 @@ export class AuthController {
    * se usó o venció (se pide otro con `POST /users/me/verificar-email`).
    */
   @Post('verificar-email')
+  @Public()
+  @Limite('token')
   @HttpCode(HttpStatus.OK)
   async verificarEmail(@Body() dto: VerificarEmailDto) {
     await this.authService.verificarEmail(dto.token);
@@ -180,7 +192,6 @@ export class AuthController {
    * `[{ id, nombre }]` y `alergia`, "Otra") o `profesional` (legajo).
    */
   @Get('me')
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   me(@Req() req: Request) {
     return req.user;
@@ -195,7 +206,6 @@ export class AuthController {
    * `X-Client: mobile`). 400 si la actual no es correcta o la nueva es igual.
    */
   @Patch('password')
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @X_CLIENT
   async changePassword(

@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { createHmac, timingSafeEqual } from 'crypto';
 
 const GRAPH_URL = 'https://graph.facebook.com/v23.0';
+// Without a limit, a call Meta never answers would hold the reminder job (it sends one by one).
+const TIMEOUT_MS = 10_000;
 
 // Constant-time comparison, so the response time doesn't leak how much of a secret matched.
 function iguales(a: string, b: string): boolean {
@@ -107,19 +109,39 @@ export class WhatsAppService {
     const phoneNumberId = this.configService.getOrThrow<string>(
       'WHATSAPP_PHONE_NUMBER_ID',
     );
-    const respuesta = await fetch(`${GRAPH_URL}/${phoneNumberId}/messages`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.configService.getOrThrow<string>('WHATSAPP_TOKEN')}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ messaging_product: 'whatsapp', ...mensaje }),
-    });
+    // WHATSAPP_API_URL only for tests (like EXPO_PUSH_URL): a fake Meta server.
+    const url = this.configService.get<string>('WHATSAPP_API_URL') || GRAPH_URL;
+    let respuesta: Response;
+    try {
+      respuesta = await fetch(`${url}/${phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.configService.getOrThrow<string>('WHATSAPP_TOKEN')}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ messaging_product: 'whatsapp', ...mensaje }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === 'TimeoutError') {
+        throw new Error(`WhatsApp: no answer in ${TIMEOUT_MS / 1000} s`);
+      }
+      throw error;
+    }
 
-    const datos = (await respuesta.json()) as {
+    // Meta answers JSON, but a proxy or an outage can give an HTML page.
+    const texto = await respuesta.text();
+    let datos: {
       messages?: { id: string }[];
       error?: { code: number; message: string };
     };
+    try {
+      datos = JSON.parse(texto) as typeof datos;
+    } catch {
+      throw new Error(
+        `WhatsApp ${respuesta.status}: not JSON (${texto.slice(0, 100)})`,
+      );
+    }
     if (!respuesta.ok || !datos.messages?.length) {
       throw new Error(
         `WhatsApp ${datos.error?.code ?? respuesta.status}: ${datos.error?.message ?? 'no message id'}`,
