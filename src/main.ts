@@ -85,6 +85,10 @@ async function bootstrap() {
     SwaggerModule.setup('api', app, document);
   }
 
+  // On SIGTERM (Docker stopping or restarting the container) Nest closes in order: the cron jobs
+  // stop and Prisma disconnects (onModuleDestroy), instead of the process being cut mid-work.
+  app.enableShutdownHooks();
+
   await app.listen(process.env.PORT ?? 3000);
 }
 bootstrap();
