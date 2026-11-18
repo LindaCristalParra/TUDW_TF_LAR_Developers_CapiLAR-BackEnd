@@ -4,13 +4,11 @@ import {
   Controller,
   Post,
   UploadedFile,
-  UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
+import { Limite } from '../common/limites';
 import type { ArchivoSubido } from '../fotos/fotos.service';
 import { SubirFotoInterceptor } from '../fotos/subir-foto.interceptor';
 import { Rol } from '../generated/prisma/client';
@@ -22,7 +20,6 @@ import { formatoImagen, HairColorService } from './hair-color.service';
 // The /** */ comments on each route are the Swagger summary and description.
 @ApiTags('hair-color')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Rol.CLIENTE, Rol.PROFESIONAL)
 @Controller('hair-color')
 export class HairColorController {
@@ -39,6 +36,7 @@ export class HairColorController {
    * Puede tardar hasta un minuto.
    */
   @Post('preview')
+  @Limite('youcam')
   @UseInterceptors(SubirFotoInterceptor)
   @ApiConsumes('multipart/form-data')
   @ApiBody({

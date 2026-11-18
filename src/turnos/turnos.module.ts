@@ -1,5 +1,8 @@
 import { Module } from '@nestjs/common';
+import { AlertasStockModule } from '../alertas-stock/alertas-stock.module';
+import { FichasModule } from '../fichas/fichas.module';
 import { MailModule } from '../mail/mail.module';
+import { PushModule } from '../push/push.module';
 import { UsersModule } from '../users/users.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { AgendaDiariaCron } from './agenda-diaria.cron';
@@ -10,7 +13,14 @@ import { TurnosService } from './turnos.service';
 import { WhatsAppWebhookController } from './whatsapp-webhook.controller';
 
 @Module({
-  imports: [MailModule, UsersModule, WhatsAppModule],
+  imports: [
+    AlertasStockModule,
+    FichasModule,
+    MailModule,
+    PushModule,
+    UsersModule,
+    WhatsAppModule,
+  ],
   controllers: [
     TurnosController,
     ClientesTurnosController,

@@ -97,6 +97,13 @@ export interface MailSerie {
   ruta: string;
 }
 
+/** Context of templates/stock-minimo.hbs (F11): the items that reached their minimum. */
+export interface MailStockMinimo {
+  nombre: string;
+  // stock and minimo in containers, already formatted (e.g. "0,5")
+  articulos: { nombre: string; stock: string; minimo: string }[];
+}
+
 @Injectable()
 export class MailService {
   constructor(
@@ -176,6 +183,26 @@ export class MailService {
       subject: `Tu agenda de mañana, ${contenido.fecha}`,
       template: 'agenda-diaria',
       context: { ...contenido, link: `${frontendUrl}/panel/agenda` },
+    });
+  }
+
+  // To the ADMINs, the button opens the stock panel.
+  async sendStockMinimo(
+    email: string,
+    contenido: MailStockMinimo,
+  ): Promise<void> {
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+    const [primero] = contenido.articulos;
+    const asunto =
+      contenido.articulos.length === 1
+        ? `${primero.nombre} llegó al stock mínimo`
+        : `${contenido.articulos.length} artículos llegaron al stock mínimo`;
+
+    await this.mailerService.sendMail({
+      to: email,
+      subject: `⚠️ ${asunto}`,
+      template: 'stock-minimo',
+      context: { ...contenido, link: `${frontendUrl}/panel/stock` },
     });
   }
 

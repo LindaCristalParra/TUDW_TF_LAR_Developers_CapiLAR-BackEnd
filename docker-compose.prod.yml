@@ -1,0 +1,70 @@
+# Production on the server (PWA-190): the API behind Caddy, which serves HTTPS with its own
+# certificate. The database is RDS (outside this file); the server's .env points to it.
+#
+#   docker compose -f docker-compose.prod.yml --profile migrate build   # both images (a plain
+#                                                                       # build skips migrate)
+#   docker compose -f docker-compose.prod.yml run --rm migrate      # pending migrations
+#   docker compose -f docker-compose.prod.yml up -d                 # API + Caddy
+#
+# The local docker-compose.yml (MySQL for development) is not used on the server.
+
+services:
+  api:
+    build:
+      context: .
+      target: runtime
+    image: capilar-api
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORT: '3000'
+      # Caddy is the only proxy in front: the request limits count by the client's IP.
+      TRUST_PROXY: '1'
+    volumes:
+      # Profile photos, kept across new deploys.
+      - uploads:/app/uploads
+    # Not published on the server: only Caddy reaches it, over the compose network.
+    expose:
+      - '3000'
+    logging: &logs
+      driver: json-file
+      # So the logs don't fill the server's disk.
+      options:
+        max-size: 10m
+        max-file: '5'
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      # The API's domain (e.g. api.capilar.com.ar), from the .env. Its DNS must point to this
+      # server before the first start, so Caddy can get the certificate.
+      API_DOMAIN: ${API_DOMAIN:?API_DOMAIN is not set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates: kept so they aren't requested again on every restart.
+      - caddy_data:/data
+      - caddy_config:/config
+    logging: *logs
+
+  # Runs once per deploy, not with `up`: docker compose -f docker-compose.prod.yml run --rm migrate
+  # The seed: docker compose -f docker-compose.prod.yml run --rm migrate npx prisma db seed
+  migrate:
+    build:
+      context: .
+      target: migrate
+    image: capilar-migrate
+    env_file: .env
+    profiles:
+      - migrate
+
+volumes:
+  uploads:
+  caddy_data:
+  caddy_config:

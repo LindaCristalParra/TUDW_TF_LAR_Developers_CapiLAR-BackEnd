@@ -7,14 +7,11 @@ import {
   Post,
   Query,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { fechaCorta } from '../common/fecha-hora';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { ApiFoto } from '../fotos/api-foto.decorator';
@@ -30,7 +27,6 @@ import { ProfesionalesService } from './profesionales.service';
 // The /** */ comments on each route are the Swagger summary and description.
 @ApiTags('profesionales')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('profesionales')
 export class ProfesionalesController {
   constructor(private readonly profesionalesService: ProfesionalesService) {}

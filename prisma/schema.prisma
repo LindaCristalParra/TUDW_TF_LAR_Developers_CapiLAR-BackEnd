@@ -58,6 +58,7 @@ model Usuario {
 
   notificaciones Notificacion[]
   sesiones       Sesion[]
+  remitos        Remito[]
 }
 
 // One per login (device), so the web and the app can be open at the same time.
@@ -72,6 +73,9 @@ model Sesion {
   // Logout, reuse of an old token, password change or reset, or deactivation. null = active.
   revocadaEn DateTime?
   creadaEn   DateTime  @default(now())
+  // Expo push token of the phone that logged in (PWA-265), null if it didn't register one. Unique: the
+  // same phone with another account moves its token to the new session.
+  pushToken  String?   @unique @db.VarChar(255)
 
   usuario Usuario @relation(fields: [usuarioId], references: [id])
 
@@ -248,12 +252,17 @@ model SerieTurno {
 
 // One row per service. Services run one after another in id order, each with its own professional.
 model TurnoDetalle {
-  id            Int     @id @default(autoincrement())
+  id            Int      @id @default(autoincrement())
   turnoId       Int
   profesionalId Int
   servicioId    Int
   // Price when booked, so later price changes don't alter past turnos.
-  precioBase    Decimal @db.Decimal(10, 2)
+  precioBase    Decimal  @db.Decimal(10, 2)
+  // Minutes, copied from the service when booked (PWA-268), so a later change to its duration
+  // doesn't move the turnos already booked. Rescheduling takes the service's current duration.
+  duracion      Int
+  // Price charged when the turno is completed (PWA-220). Defaults to precioBase; null until then.
+  precioFinal   Decimal? @db.Decimal(10, 2)
 
   turno       Turno          @relation(fields: [turnoId], references: [id])
   profesional Profesional    @relation(fields: [profesionalId], references: [legajo])
@@ -305,6 +314,8 @@ model FichaTecnica {
   turnoDetalle TurnoDetalle @relation(fields: [turnoDetalleId], references: [id])
   formulas     Formula[]
   fotos        FotoFicha[]
+  // Its CONSUMO movements: the stock it used, and the adjustments when it's edited once closed.
+  remitos      Remito[]
 
   @@index([turnoDetalleId])
 }
@@ -352,19 +363,200 @@ model Formula {
 }
 
 model FormulaInsumo {
-  id         Int           @id @default(autoincrement())
-  formulaId  Int
-  producto   String        @db.VarChar(100)
-  marca      String?       @db.VarChar(100)
-  tono       String?       @db.VarChar(50)
-  cantidad   Decimal?      @db.Decimal(10, 2)
-  unidad     UnidadInsumo?
-  // Inventory item (F11). No foreign key until that table exists.
-  articuloId Int?
+  id            Int           @id @default(autoincrement())
+  formulaId     Int
+  // Free text (up to 100), or the item's nombre (up to 150).
+  producto      String        @db.VarChar(150)
+  // Free text (up to 100), or the item's brand + line (100 + space + 100).
+  marca         String?       @db.VarChar(201)
+  tono          String?       @db.VarChar(50)
+  cantidad      Decimal?      @db.Decimal(10, 2)
+  unidad        UnidadInsumo?
+  // Inventory item (F11), optional. With it, the back fills producto, marca, tono and unidad.
+  articuloId    Int?
+  // precioCosto / pesoInicial × cantidad, when the turno is completed. null for free text or an open record.
+  costoSubtotal Decimal?      @db.Decimal(10, 2)
 
-  formula Formula @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+  formula  Formula   @relation(fields: [formulaId], references: [id], onDelete: Cascade)
+  // Restrict, not the SetNull Prisma uses by default on optional relations: items are only deactivated.
+  articulo Articulo? @relation(fields: [articuloId], references: [id], onDelete: Restrict)
 
   @@index([formulaId])
+  @@index([articuloId])
+}
+
+// F11 stock. AMBOS: used in the salon and also sold (e.g. ampoules), with one stock.
+enum UsoArticulo {
+  SALON
+  VENTA
+  AMBOS
+}
+
+enum TipoProducto {
+  TINTURA
+  OXIDANTE
+  DECOLORANTE
+  // Perm lotion.
+  PERMANENTE
+  SHAMPOO
+  ACONDICIONADOR
+  MASCARA
+  AMPOLLA
+  SERUM
+  PEINADO
+  PROTECTOR_TERMICO
+  KIT
+  OTRO
+}
+
+enum TipoDeposito {
+  SALON
+  DEPOSITO
+  VITRINA
+}
+
+// Brand + product line (e.g. Fidelité / Argán). No logical delete in the DER: removed only when unused.
+// No line is stored as '' (not NULL), so the unique index also stops a repeated brand without a line
+// (MySQL lets NULLs repeat). The API shows it as null (marcaParaApi).
+model Marca {
+  id          Int    @id @default(autoincrement())
+  razonSocial String @db.VarChar(100)
+  linea       String @default("") @db.VarChar(100)
+
+  articulos Articulo[]
+
+  @@unique([razonSocial, linea])
+}
+
+// An inventory item. stock and stockMinAlert count containers, with decimals (3.5 = three full and half of
+// one); a record's consumption takes cantidad / pesoInicial. Stock only changes through movements.
+model Articulo {
+  id               Int          @id @default(autoincrement())
+  nombre           String       @db.VarChar(150)
+  // The supplier's article code (e.g. 401, 725TS), optional.
+  codigo           String?      @db.VarChar(30)
+  uso              UsoArticulo
+  tipoProducto     TipoProducto
+  stock            Decimal      @default(0) @db.Decimal(10, 3)
+  stockMinAlert    Decimal      @default(0) @db.Decimal(10, 3)
+  fechaVencimiento DateTime?    @db.Date
+  // What the salon pays for one container.
+  precioCosto      Decimal      @db.Decimal(10, 2)
+  // Only for items that are sold.
+  precioVenta      Decimal?     @db.Decimal(10, 2)
+  // Content of one container, in tipoPeso.
+  pesoInicial      Decimal      @db.Decimal(10, 2)
+  tipoPeso         UnidadInsumo
+  tonalidad        String?      @db.VarChar(50)
+  tipoDeposito     TipoDeposito
+  // Text stored in the item's QR, generated by the back (e.g. ART-7K2M9QXP).
+  qr               String       @unique @db.VarChar(20)
+  marcaId          Int
+  fechaAlta        DateTime     @default(now())
+  fechaBaja        DateTime?
+
+  marca Marca @relation(fields: [marcaId], references: [id])
+
+  remitoDetalles RemitoDetalle[]
+  envaseEnUso    ArticuloUso?
+  formulaInsumos FormulaInsumo[]
+  notificaciones Notificacion[]
+
+  @@index([marcaId])
+}
+
+// The container currently open of an item (F11), one per item at most; finishing it deletes the row.
+// Informative: opening one doesn't move stock; a record's consumption lowers both stock and pesoActual.
+model ArticuloUso {
+  id         Int          @id @default(autoincrement())
+  articuloId Int          @unique
+  // What's left in the open container, in tipoPeso.
+  pesoActual Decimal      @db.Decimal(10, 2)
+  // Copied from the item, never sent by the front.
+  tipoPeso   UnidadInsumo
+
+  articulo Articulo @relation(fields: [articuloId], references: [id])
+}
+
+// COMPRA: a purchase from a supplier (F13). INGRESO/EGRESO/AJUSTE: manual movements, without supplier.
+// CONSUMO: what a technical record used when its turno was completed (and its adjustments if it's
+// edited once closed); never sent by the front.
+enum TipoRemito {
+  COMPRA
+  INGRESO
+  EGRESO
+  AJUSTE
+  CONSUMO
+}
+
+// Manual movements are born APLICADO; PENDIENTE and ANULADO are for purchases (F13).
+enum EstadoRemito {
+  PENDIENTE
+  APLICADO
+  ANULADO
+}
+
+// A stock movement (the DER has no movements table): its RemitoDetalle rows are each item's history.
+model Remito {
+  id             Int          @id @default(autoincrement())
+  fecha          DateTime     @default(now())
+  tipo           TipoRemito
+  estado         EstadoRemito
+  numComprobante String?      @db.VarChar(30)
+  // The supplier of a COMPRA (required there, checked in the service). null for the other types.
+  proveedorId    Int?
+  // Who registered it (usuarioId instead of the DER's profesionalId: an ADMIN may not be a professional).
+  usuarioId      Int
+  // Required for EGRESO and AJUSTE (checked in the service).
+  motivo         String?      @db.VarChar(255)
+  // CONSUMO: the record it belongs to (outside the DER). null for the other types.
+  fichaId        Int?
+
+  usuario   Usuario         @relation(fields: [usuarioId], references: [id])
+  // Restrict, not the SetNull Prisma uses by default on optional relations: records and suppliers
+  // are only deactivated.
+  ficha     FichaTecnica?   @relation(fields: [fichaId], references: [id], onDelete: Restrict)
+  proveedor Proveedor?      @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  detalles  RemitoDetalle[]
+
+  @@index([usuarioId])
+  @@index([fichaId])
+  // Also finds a supplier's repeated numComprobante (unique per supplier among the non-ANULADO ones,
+  // checked in code: a unique index can't leave the cancelled ones out).
+  @@index([proveedorId, numComprobante])
+}
+
+// A supplier (F13). Not linked to brands (decided 07/11): what was bought from it comes from its
+// purchases. Logical delete: an inactive supplier keeps its purchases but takes no new ones.
+model Proveedor {
+  id                     Int       @id @default(autoincrement())
+  // Digits only, no dashes (e.g. 30712345678), with a valid check digit.
+  cuit                   String    @unique @db.Char(11)
+  razonSocial            String    @db.VarChar(150)
+  telefono               String?   @db.VarChar(30)
+  email                  String?   @db.VarChar(191)
+  // Free text (e.g. "30 días, 5% por pago contado").
+  condicionesComerciales String?   @db.VarChar(500)
+  fechaAlta              DateTime  @default(now())
+  fechaBaja              DateTime?
+
+  remitos Remito[]
+}
+
+model RemitoDetalle {
+  id            Int      @id @default(autoincrement())
+  remitoId      Int
+  articuloId    Int
+  // Containers, signed (an EGRESO is negative). In an AJUSTE it is the difference with the counted stock.
+  cantidad      Decimal  @db.Decimal(10, 3)
+  // What one container cost in a COMPRA (F13); it updates the item's precioCosto.
+  costoUnitario Decimal? @db.Decimal(10, 2)
+
+  remito   Remito   @relation(fields: [remitoId], references: [id])
+  articulo Articulo @relation(fields: [articuloId], references: [id])
+
+  @@index([remitoId])
+  @@index([articuloId])
 }
 
 enum MedioNotificacion {
@@ -375,6 +567,7 @@ enum MedioNotificacion {
 enum TipoNotificacion {
   RECORDATORIO
   AGENDA_DIARIA
+  STOCK_MINIMO
 }
 
 enum EstadoEnvio {
@@ -382,12 +575,16 @@ enum EstadoEnvio {
   ERROR
 }
 
-// Notices sent by scheduled jobs (F06 reminder, F07 daily agenda), one row per attempt.
+// Notices sent by scheduled jobs (F06 reminder, F07 daily agenda) and low-stock alerts (F11),
+// one row per attempt.
 model Notificacion {
   id          Int               @id @default(autoincrement())
-  // The reminder's turno; null for the daily agenda.
+  // The reminder's turno; null for the daily agenda and stock alerts.
   turnoId     Int?
-  // Who received it: the client (reminder) or the professional (daily agenda).
+  // STOCK_MINIMO: the item that reached its minimum. One row per ADMIN and item, even when one
+  // mail lists several items.
+  articuloId  Int?
+  // Who received it: the client (reminder), the professional (daily agenda) or an ADMIN (stock).
   usuarioId   Int
   medio       MedioNotificacion
   tipo        TipoNotificacion
@@ -400,8 +597,11 @@ model Notificacion {
   // SHA-256 of the confirm/cancel link token (reminder only).
   tokenHash   String?           @unique @db.Char(64)
 
-  turno   Turno?  @relation(fields: [turnoId], references: [id])
-  usuario Usuario @relation(fields: [usuarioId], references: [id])
+  turno    Turno?    @relation(fields: [turnoId], references: [id])
+  // Explicit Restrict: Prisma's default for an optional relation is SetNull.
+  articulo Articulo? @relation(fields: [articuloId], references: [id], onDelete: Restrict)
+  usuario  Usuario   @relation(fields: [usuarioId], references: [id])
 
   @@index([turnoId, tipo])
+  @@index([articuloId])
 }

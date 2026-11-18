@@ -14,6 +14,7 @@ import {
 } from '@nestjs/common';
 import { ApiExcludeController } from '@nestjs/swagger';
 import type { Request } from 'express';
+import { Public } from '../auth/public.decorator';
 import { WhatsAppService, aNumeroWhatsApp } from '../whatsapp/whatsapp.service';
 import { TurnosService } from './turnos.service';
 
@@ -32,8 +33,9 @@ interface WebhookWhatsApp {
   }[];
 }
 
-// Only Meta calls it: no login (no guards), the signature proves the request is theirs.
+// Only Meta calls it: no login (public), the signature proves the request is theirs.
 @ApiExcludeController()
+@Public()
 @Controller('whatsapp/webhook')
 export class WhatsAppWebhookController {
   private readonly logger = new Logger(WhatsAppWebhookController.name);

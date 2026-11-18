@@ -6,13 +6,10 @@ import {
   Param,
   Patch,
   Post,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Public } from '../auth/public.decorator';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import { AlergiasService } from './alergias.service';
@@ -22,7 +19,6 @@ import { UpdateAlergiaDto } from './dto/update-alergia.dto';
 // The /** */ comments on each route are the Swagger summary and description.
 @ApiTags('alergias')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('alergias')
 export class AlergiasController {
   constructor(private readonly alergiasService: AlergiasService) {}

@@ -47,7 +47,7 @@ CapiLAR is split into separate repositories:
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org) LTS (20.x or higher) and npm
+- [Node.js](https://nodejs.org) 24.9 or higher and npm (Jest needs it to load NestJS 12, which ships as ES modules)
 - MySQL 8 (installed locally or running in Docker)
 - Git
 
@@ -65,11 +65,23 @@ Create a `.env` file in the project root (it is git-ignored and must never be co
 
 ```env
 DATABASE_URL="mysql://root:password@localhost:3306/capilar_db?allowPublicKeyRetrieval=true"
-JWT_SECRET="a-long-random-string"
-JWT_EXPIRES_IN="1d"
+JWT_SECRET="<generated, see below>"
+JWT_REFRESH_SECRET="<generated, different from JWT_SECRET>"
+JWT_EXPIRES_IN="15m"
+SWAGGER=true
 ```
 
 See `.env.example` for the full list of variables. `allowPublicKeyRetrieval=true` is required so the MariaDB driver adapter can authenticate against MySQL 8 without SSL.
+
+The app doesn't start unless `JWT_SECRET` and `JWT_REFRESH_SECRET` have at least 32 characters, are different from each other, and aren't the `change-me` examples. Generate each one with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
+```
+
+Swagger (`/api`) is only served with `SWAGGER=true`. Leave it out on a real deploy.
+
+Some routes have a request limit and answer `429` with `Retry-After` once it's passed: login and sign-up (5 per minute per IP), the routes that send an email (5 per 15 minutes per IP), the public routes with a token from an email or WhatsApp, password reset included (20 per minute per IP), and the YouCam try-on (10 per hour per user). The limits are kept in memory, so they assume one instance of the app. Behind a proxy, set `TRUST_PROXY` to the number of proxies in front of the app (usually `1`); otherwise every request counts as coming from the proxy.
 
 ### Database
 
@@ -79,7 +91,7 @@ Once the Prisma schema is set up, apply the migrations with:
 npx prisma migrate dev
 ```
 
-Create the first admin account (uses `ADMIN_EMAIL` and `ADMIN_PASSWORD` from `.env`; skipped if that email already exists):
+Create the first admin account (uses `ADMIN_EMAIL` and `ADMIN_PASSWORD` from `.env`; skipped if that email already exists; without `ADMIN_EMAIL` it only goes on, with a warning, when the database already has an admin, and fails otherwise). With `SEED_STOCK=true` it also loads test stock to try the app (10 brands and 58 items from real price lists and purchases, with made-up sale prices; each item's stock enters as an "initial stock" movement by the first active admin), only into an empty catalog; leave it `false` on a real deploy:
 
 ```bash
 npx prisma db seed
@@ -102,7 +114,7 @@ npm run build
 npm run start:prod
 ```
 
-The API runs on `http://localhost:3000` by default.
+The API runs on `http://localhost:3000` by default. `GET /health` answers `200 {"status":"ok"}` when the app is up and reaches the database, and `503` when it doesn't (the reason only goes to the log). In production it's only reachable from inside the server (Docker's healthcheck); Caddy answers `404` to it from the internet.
 
 ### YouCam (TP3, API 1)
 
@@ -121,9 +133,87 @@ To use the real API, set `PERFECT_API_KEY`, change `YOUCAM_MODO` to `real` and r
 # unit tests
 npm run test
 
-# end-to-end tests
+# end-to-end tests (start the whole app: needs the database running)
 npm run test:e2e
 ```
+
+Both run Jest through `node --experimental-vm-modules`; a plain `npx jest` fails to load `@nestjs/*`.
+
+## Deployment
+
+Production runs on AWS: the API in Docker on an EC2 server, behind [Caddy](https://caddyserver.com/) for HTTPS, and the database on RDS (MySQL 8). The web front end is deployed separately, on Vercel.
+
+```
+client ──HTTPS──▶ Caddy (80/443) ──▶ api (Docker, port 3000, not published) ──▶ RDS MySQL
+```
+
+| File | What it is |
+| --- | --- |
+| `Dockerfile` | Two images: the API (default target, production dependencies only, runs as `node`) and `migrate` (runs `prisma migrate deploy` and the seed). |
+| `docker-compose.prod.yml` | The API, Caddy and the one-off `migrate` service. The `docker-compose.yml` in the root is only the local MySQL for development. |
+| `Caddyfile` | Caddy's site: gets and renews the Let's Encrypt certificate and redirects HTTP to HTTPS. |
+
+### Server requirements
+
+- Docker Engine with the Compose plugin.
+- Ports 80 and 443 open to the internet.
+- The DNS record of the API's domain (`API_DOMAIN`) pointing to the server's IP **before** the first start, so Caddy can get the certificate.
+
+### Production `.env`
+
+Create a `.env` next to `docker-compose.prod.yml` on the server, starting from `.env.example`. It is read by the containers at run time and never goes into the image. Differences from a local `.env`:
+
+| Variable | Production value |
+| --- | --- |
+| `DATABASE_URL` | The RDS endpoint, with the app's own user (not the admin user). |
+| `JWT_SECRET`, `JWT_REFRESH_SECRET` | New secrets, generated for production (not the local ones). |
+| `COOKIE_SECURE` | `true`. |
+| `FRONTEND_URL`, `CORS_ORIGINS` | The front end's production URL (`https://...`, no trailing slash). |
+| `API_DOMAIN` | The API's domain, e.g. `api.example.com` (without `https://`). |
+| `SWAGGER` | Left out. |
+| `SEED_STOCK` | `false`. |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | The first admin, created by the seed. |
+
+`PORT`, `TRUST_PROXY` and `UPLOADS_DIR` are set by the compose file and the image; don't add them. The image runs with the salon's time zone (`TZ=America/Argentina/Buenos_Aires`).
+
+> **Watch out with `$`:** Docker Compose expands `$` inside the `.env`, so a value like `ab$cd` arrives as `ab`. Put values that contain `$` in single quotes (`'ab$cd'`) or write it as `$$`.
+
+### First deploy
+
+```bash
+git clone <repo-url> capilar-backend && cd capilar-backend
+git checkout main
+cp .env.example .env    # then fill it in (see above)
+
+docker compose -f docker-compose.prod.yml --profile migrate build               # both images
+docker compose -f docker-compose.prod.yml run --rm migrate                      # migrations
+docker compose -f docker-compose.prod.yml run --rm migrate npx prisma db seed   # first admin
+docker compose -f docker-compose.prod.yml up -d
+
+docker compose -f docker-compose.prod.yml ps   # api: Up ... (healthy)
+curl https://<API_DOMAIN>/                     # the API answers over HTTPS
+```
+
+### Updating
+
+```bash
+git pull
+docker compose -f docker-compose.prod.yml --profile migrate build
+docker compose -f docker-compose.prod.yml run --rm migrate
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Build with `--profile migrate`: a plain `build` skips the `migrate` image, and `run` would then apply the migrations of the previous version. `up -d` replaces only the containers whose image or settings changed. On stop, the API closes in order (scheduled jobs and the database connection) before exiting.
+
+### Operations
+
+```bash
+docker compose -f docker-compose.prod.yml ps             # state; the API shows "healthy" when /health answers 200
+docker compose -f docker-compose.prod.yml logs -f api    # API log (capped at 5 files of 10 MB)
+docker compose -f docker-compose.prod.yml restart api
+```
+
+Profile photos are kept in the `uploads` Docker volume and Caddy's certificates in `caddy_data`; both survive new deploys. `docker compose down -v` deletes them, so don't use `-v` on the server.
 
 ## Project structure
 

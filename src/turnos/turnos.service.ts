@@ -11,6 +11,7 @@ import {
   alergiasDeClienteSelect,
   aplanarAlergias,
 } from '../alergias/alergias-de-cliente';
+import { AlertasStockService } from '../alertas-stock/alertas-stock.service';
 import {
   EstadoEnvio,
   EstadoSerie,
@@ -33,7 +34,9 @@ import {
   MailTurno,
   TurnoAgendaDiaria,
 } from '../mail/mail.service';
+import { ConsumoService } from '../fichas/consumo.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PushService, TipoPush } from '../push/push.service';
 import { fechasDeSerie } from '../series/fechas-serie';
 import { PublicUser } from '../users/users.service';
 import { VerificacionEmailService } from '../users/verificacion-email.service';
@@ -48,10 +51,12 @@ import {
 } from './agenda';
 import { AgendaQueryDto } from './dto/agenda-query.dto';
 import { CancelarTurnoDto } from './dto/cancelar-turno.dto';
+import { CompletarTurnoDto } from './dto/completar-turno.dto';
 import { CreateTurnoDto } from './dto/create-turno.dto';
 import { HorariosLibresDto } from './dto/horarios-libres.dto';
 import { RechazarTurnoDto } from './dto/rechazar-turno.dto';
 import { ReprogramarTurnoDto } from './dto/reprogramar-turno.dto';
+import { CostoDeDetalle, costoDe, costosPorDetalle } from './rentabilidad';
 
 const MAX_DIAS_AGENDA = 31;
 // A client can cancel a CONFIRMADO turno up to this many hours before it starts.
@@ -68,7 +73,7 @@ const turnoInclude = {
   detalles: {
     orderBy: { id: 'asc' },
     include: {
-      servicio: { select: { tipo: true, tiempoDuracion: true } },
+      servicio: { select: { tipo: true } },
       profesional: {
         select: {
           legajo: true,
@@ -127,6 +132,9 @@ export class TurnosService {
     private readonly mailService: MailService,
     private readonly verificacionEmail: VerificacionEmailService,
     private readonly whatsAppService: WhatsAppService,
+    private readonly consumoService: ConsumoService,
+    private readonly alertasStock: AlertasStockService,
+    private readonly pushService: PushService,
   ) {}
 
   // turnoId (rescheduling) and clienteId (booking for a client) are for professionals only.
@@ -217,6 +225,7 @@ export class TurnosService {
               servicioId: item.servicioId,
               profesionalId: item.legajo,
               precioBase: item.precio,
+              duracion: item.duracion,
             })),
           },
         },
@@ -232,6 +241,7 @@ export class TurnosService {
           'Tu pedido de turno ya está en manos del salón. Te avisamos por mail apenas lo confirmen.',
         boton: 'VER MIS TURNOS',
       });
+      this.pushAProfesionales(turno, 'TURNO_NUEVO', 'Nueva solicitud de turno');
       for (const profesional of this.profesionalesDe(turno)) {
         this.enviar(profesional.email, 'Nueva solicitud de turno', {
           ...this.contenidoBase(turno),
@@ -244,9 +254,11 @@ export class TurnosService {
         });
       }
     } else {
-      this.avisarConfirmado(turno);
+      // A push only when the salon booked it: she doesn't need one for what she just did (07/11).
+      this.avisarConfirmado(turno, { push: !esCliente });
       // Booked by the client and confirmed on the spot: the professionals learn it by mail.
       if (esCliente) {
+        this.pushAProfesionales(turno, 'TURNO_NUEVO', 'Tenés un turno nuevo');
         for (const profesional of this.profesionalesDe(turno)) {
           this.enviar(profesional.email, 'Tenés un turno nuevo', {
             ...this.contenidoBase(turno),
@@ -297,7 +309,7 @@ export class TurnosService {
   }
 
   // Read-only for the whole salon: one professional with legajo, everyone without it.
-  async agenda(query: AgendaQueryDto) {
+  async agenda(query: AgendaQueryDto, actor: PublicUser) {
     if (!esFechaValida(query.desde) || !esFechaValida(query.hasta)) {
       throw new BadRequestException('Las fechas no son válidas');
     }
@@ -324,7 +336,17 @@ export class TurnosService {
       orderBy: [{ fecha: 'asc' }, { horaInicio: 'asc' }],
       include: turnoInclude,
     });
-    return turnos.map((t) => this.formatear(t));
+    if (actor.rol !== Rol.ADMIN) {
+      return turnos.map((t) => this.formatear(t));
+    }
+    // Cost and margin are for the ADMIN only, and only once the turno is completed.
+    const completados = turnos
+      .filter((t) => t.estado === EstadoTurno.COMPLETADO)
+      .flatMap((t) => t.detalles.map((d) => d.id));
+    const costos = await costosPorDetalle(this.prisma, {
+      id: { in: completados },
+    });
+    return turnos.map((t) => this.formatear(t, { costos }));
   }
 
   async aceptar(id: number, actor: PublicUser) {
@@ -339,7 +361,7 @@ export class TurnosService {
       data: { estado: EstadoTurno.CONFIRMADO },
       include: turnoInclude,
     });
-    this.avisarConfirmado(actualizado);
+    this.avisarConfirmado(actualizado, { push: true });
     return this.formatear(actualizado);
   }
 
@@ -379,15 +401,20 @@ export class TurnosService {
     });
 
     // Friendly notice without the internal reason.
-    this.avisarCliente(actualizado, 'Sobre tu solicitud de turno', {
-      estilo: 'OTRO_HORARIO',
-      titulo: 'Busquemos otro horario',
-      mensaje: alternativas.length
-        ? 'No pudimos confirmar tu turno en ese horario, pero queremos atenderte. Elegí el que mejor te quede de estos y pedilo desde la app.'
-        : 'No pudimos confirmar tu turno en ese horario, pero queremos atenderte. Entrá a la app y elegí otro horario que te quede cómodo.',
-      alternativas,
-      boton: 'ELEGIR OTRO HORARIO',
-    });
+    this.avisarCliente(
+      actualizado,
+      'Sobre tu solicitud de turno',
+      {
+        estilo: 'OTRO_HORARIO',
+        titulo: 'Busquemos otro horario',
+        mensaje: alternativas.length
+          ? 'No pudimos confirmar tu turno en ese horario, pero queremos atenderte. Elegí el que mejor te quede de estos y pedilo desde la app.'
+          : 'No pudimos confirmar tu turno en ese horario, pero queremos atenderte. Entrá a la app y elegí otro horario que te quede cómodo.',
+        alternativas,
+        boton: 'ELEGIR OTRO HORARIO',
+      },
+      'TURNO_RECHAZADO',
+    );
     return this.formatear(actualizado);
   }
 
@@ -423,11 +450,14 @@ export class TurnosService {
         clienteId: turno.clienteId,
       });
       assertDisponible(ctx, dto.horaInicio);
+      // The rescheduled turno takes each service's current duration (decided 08/11, PWA-268);
+      // the price stays the one it was booked at.
       for (const [i, detalle] of turno.detalles.entries()) {
-        if (detalle.profesionalId !== items[i].legajo) {
+        const { legajo, duracion } = ctx.items[i];
+        if (detalle.profesionalId !== legajo || detalle.duracion !== duracion) {
           await tx.turnoDetalle.update({
             where: { id: detalle.id },
-            data: { profesionalId: items[i].legajo },
+            data: { profesionalId: legajo, duracion },
           });
         }
       }
@@ -445,13 +475,18 @@ export class TurnosService {
       });
     });
 
-    this.avisarCliente(actualizado, 'Te proponemos un nuevo horario', {
-      estilo: 'REPROGRAMADO',
-      titulo: 'Te proponemos un nuevo horario',
-      mensaje:
-        'El salón necesitó mover tu turno. Este es el horario nuevo: entrá a la app para aceptarlo. Si no te queda cómodo, podés cancelarlo y pedir otro.',
-      boton: 'VER MI TURNO',
-    });
+    this.avisarCliente(
+      actualizado,
+      'Te proponemos un nuevo horario',
+      {
+        estilo: 'REPROGRAMADO',
+        titulo: 'Te proponemos un nuevo horario',
+        mensaje:
+          'El salón necesitó mover tu turno. Este es el horario nuevo: entrá a la app para aceptarlo. Si no te queda cómodo, podés cancelarlo y pedir otro.',
+        boton: 'VER MI TURNO',
+      },
+      'TURNO_REPROGRAMADO',
+    );
     return this.formatear(actualizado);
   }
 
@@ -467,7 +502,8 @@ export class TurnosService {
       data: { estado: EstadoTurno.CONFIRMADO },
       include: turnoInclude,
     });
-    this.avisarConfirmado(actualizado);
+    // She accepted it herself: email only (07/11).
+    this.avisarConfirmado(actualizado, { push: false });
     // The new time is final now: the professionals of the turno learn it by mail.
     const { nombre, apellido } = actualizado.cliente.usuario;
     for (const profesional of this.profesionalesDe(actualizado)) {
@@ -502,12 +538,17 @@ export class TurnosService {
       data: { estado: EstadoTurno.CANCELADO, motivo },
       include: turnoInclude,
     });
-    this.avisarCliente(actualizado, 'Tu turno fue cancelado', {
-      estilo: 'CANCELADO',
-      titulo: 'Tu turno fue cancelado',
-      mensaje: `Lamentamos avisarte que el salón tuvo que cancelar tu turno. Motivo: "${motivo}". Entrá a la app y elegí otro horario que te quede cómodo.`,
-      boton: 'PEDIR OTRO TURNO',
-    });
+    this.avisarCliente(
+      actualizado,
+      'Tu turno fue cancelado',
+      {
+        estilo: 'CANCELADO',
+        titulo: 'Tu turno fue cancelado',
+        mensaje: `Lamentamos avisarte que el salón tuvo que cancelar tu turno. Motivo: "${motivo}". Entrá a la app y elegí otro horario que te quede cómodo.`,
+        boton: 'PEDIR OTRO TURNO',
+      },
+      'TURNO_CANCELADO',
+    );
     // The other professionals of the turno also lose that slot from their agenda.
     for (const profesional of this.profesionalesDe(actualizado)) {
       if (profesional.email === actor.email) continue;
@@ -556,6 +597,7 @@ export class TurnosService {
     const titulo = tardia
       ? `Se canceló un turno con menos de ${HORAS_CANCELACION_CLIENTE} h de aviso`
       : 'Se canceló un turno';
+    this.pushAProfesionales(actualizado, 'TURNO_CANCELADO', titulo);
     for (const profesional of this.profesionalesDe(actualizado)) {
       this.enviar(profesional.email, titulo, {
         ...this.contenidoBase(actualizado),
@@ -578,7 +620,7 @@ export class TurnosService {
     }
   }
 
-  async completar(id: number, actor: PublicUser) {
+  async completar(id: number, dto: CompletarTurnoDto, actor: PublicUser) {
     const turno = await this.findParaGestionar(id, actor);
     if (turno.estado !== EstadoTurno.CONFIRMADO) {
       throw new BadRequestException(
@@ -590,19 +632,70 @@ export class TurnosService {
         'El turno todavía no empezó: se completa desde su hora de inicio',
       );
     }
-    // The technical records of the turno are locked together with it (immutable history, FIC-01).
-    const [actualizado] = await this.prisma.$transaction([
-      this.prisma.turno.update({
-        where: { id },
-        data: { estado: EstadoTurno.COMPLETADO },
-        include: turnoInclude,
-      }),
-      this.prisma.fichaTecnica.updateMany({
-        where: { turnoDetalle: { turnoId: id }, cerradaEn: null },
-        data: { cerradaEn: new Date() },
-      }),
-    ]);
-    return this.formatear(actualizado);
+    // What was charged for each service (PWA-220): the ones not sent are charged at precioBase.
+    // The ids of a turno's services never change, so the turno read above is enough to check them.
+    const cobrado = new Map(
+      (dto.detalles ?? []).map((p) => [p.turnoDetalleId, p.precioFinal]),
+    );
+    const ajenos = [...cobrado.keys()].filter(
+      (detalleId) => !turno.detalles.some((d) => d.id === detalleId),
+    );
+    if (ajenos.length) {
+      throw new BadRequestException(
+        `Estos servicios no son de este turno: ${ajenos.join(', ')}`,
+      );
+    }
+    // The technical records of the turno are closed together with it, and their supplies with an
+    // item are discounted from the stock (PWA-176). Without stock it is discounted anyway (decided
+    // 31/10) and sinStock tells which items went below 0.
+    const { sinStock, enMinimo } = await this.prisma.$transaction(
+      async (tx) => {
+        // Only if it's still CONFIRMADO: two "complete" at the same time can't discount twice.
+        const { count } = await tx.turno.updateMany({
+          where: { id, estado: EstadoTurno.CONFIRMADO },
+          data: {
+            estado: EstadoTurno.COMPLETADO,
+            // Only if sent: otherwise it keeps the one chosen when booking.
+            ...(dto.metodoPago ? { metodoPago: dto.metodoPago } : {}),
+          },
+        });
+        if (!count) {
+          throw new BadRequestException(
+            'Solo se pueden completar turnos confirmados',
+          );
+        }
+        await tx.fichaTecnica.updateMany({
+          where: { turnoDetalle: { turnoId: id }, cerradaEn: null },
+          data: { cerradaEn: new Date() },
+        });
+        const fichas = await tx.fichaTecnica.findMany({
+          where: { turnoDetalle: { turnoId: id }, fechaBaja: null },
+          select: { id: true },
+        });
+        const consumo = await this.consumoService.ajustar(tx, fichas);
+        // After the discount and with updateMany (no SELECT): a read before the fichas' UPDATE
+        // would fix the transaction's snapshot before it waits for a record being edited, and
+        // ajustar would then read the old formulas.
+        for (const detalle of turno.detalles) {
+          await tx.turnoDetalle.updateMany({
+            where: { id: detalle.id },
+            data: {
+              precioFinal: cobrado.get(detalle.id) ?? detalle.precioBase,
+            },
+          });
+        }
+        return consumo;
+      },
+      // Like a manual movement: it may wait for other movements of the same items.
+      { maxWait: 10_000, timeout: 10_000 },
+    );
+    // Items that reached their minimum (PWA-179): the ADMINs get one email after the commit.
+    this.alertasStock.avisar(enMinimo);
+    const actualizado = await this.prisma.turno.findUniqueOrThrow({
+      where: { id },
+      include: turnoInclude,
+    });
+    return { ...this.formatear(actualizado), sinStock };
   }
 
   // CLIENTE: "I'll be there", for a CONFIRMADO turno that hasn't started. Confirming twice keeps the first date.
@@ -681,6 +774,14 @@ export class TurnosService {
         (await this.recordarPorMail(turno, inicio))
       ) {
         enviados++;
+        // The push goes with the email: pushes aren't saved in Notificacion (07/11), so the
+        // email's row is what keeps it to once per turno time. A failed email is retried on the
+        // next run, and its push with it.
+        await this.pushService.enviarYEsperar([turno.cliente.usuario.id], {
+          titulo: '¿Nos vemos en tu turno?',
+          cuerpo: `${this.cuerpoPush(turno)}. Confirmá desde la app si venís.`,
+          data: { tipo: 'RECORDATORIO', turnoId: turno.id },
+        });
       }
       if (
         !yaEnviado(MedioNotificacion.WHATSAPP) &&
@@ -1163,7 +1264,10 @@ export class TurnosService {
   }
 
   private profesionalesDe(turno: TurnoCompleto) {
-    const vistos = new Map<number, { nombre: string; email: string }>();
+    const vistos = new Map<
+      number,
+      { id: number; nombre: string; email: string }
+    >();
     for (const d of turno.detalles) {
       vistos.set(d.profesionalId, d.profesional.usuario);
     }
@@ -1171,10 +1275,28 @@ export class TurnosService {
   }
 
   // Each service with its own time range (they are done one after another).
+  // With `costos` (ADMIN agenda), each service of a completed turno adds its cost and margin.
   private formatear(
     turno: TurnoCompleto,
-    opciones: { paraCliente?: boolean } = {},
+    opciones: {
+      paraCliente?: boolean;
+      costos?: Map<number, CostoDeDetalle>;
+    } = {},
   ) {
+    const { costos } = opciones;
+    const completado = turno.estado === EstadoTurno.COMPLETADO;
+    const rentabilidadDe = (d: TurnoCompleto['detalles'][number]) => {
+      if (!completado || !costos) {
+        return { costo: null, margen: null, costoIncompleto: null };
+      }
+      const c = costoDe(costos, d.id);
+      const cobrado = d.precioFinal ?? d.precioBase;
+      return {
+        costo: c.costo,
+        margen: cobrado.minus(c.costo),
+        costoIncompleto: c.costoIncompleto,
+      };
+    };
     const detalles = tramosDeDetalles(turno.horaInicio, turno.detalles).map(
       ({ detalle: d, inicio, fin }) => ({
         id: d.id,
@@ -1185,8 +1307,11 @@ export class TurnosService {
         horaInicio: aHora(inicio),
         horaFin: aHora(fin),
         precioBase: d.precioBase,
+        // What was charged, set when the turno is completed (null until then).
+        precioFinal: d.precioFinal,
         // Salon only: the client sees her records in GET /fichas/mias.
         ...(opciones.paraCliente ? {} : { fichaId: d.fichas[0]?.id ?? null }),
+        ...(costos ? rentabilidadDe(d) : {}),
       }),
     );
     const { usuario, alergia, alergias } = turno.cliente;
@@ -1217,7 +1342,25 @@ export class TurnosService {
         emailVerificadoEn: usuario.emailVerificadoEn,
       },
       detalles,
+      ...(costos ? { rentabilidad: this.totalDe(turno, costos) } : {}),
     };
+  }
+
+  // Totals of a completed turno (null otherwise): charged, material cost and margin.
+  private totalDe(turno: TurnoCompleto, costos: Map<number, CostoDeDetalle>) {
+    if (turno.estado !== EstadoTurno.COMPLETADO) {
+      return null;
+    }
+    let cobrado = new Prisma.Decimal(0);
+    let costo = new Prisma.Decimal(0);
+    let costoIncompleto = false;
+    for (const d of turno.detalles) {
+      const c = costoDe(costos, d.id);
+      cobrado = cobrado.plus(d.precioFinal ?? d.precioBase);
+      costo = costo.plus(c.costo);
+      costoIncompleto ||= c.costoIncompleto;
+    }
+    return { cobrado, costo, margen: cobrado.minus(costo), costoIncompleto };
   }
 
   private contenidoBase(turno: TurnoCompleto) {
@@ -1237,21 +1380,32 @@ export class TurnosService {
     };
   }
 
-  private avisarConfirmado(turno: TurnoCompleto): void {
-    this.avisarCliente(turno, 'Tu turno está confirmado', {
-      estilo: 'CONFIRMADO',
-      titulo: '¡Tu turno está confirmado!',
-      mensaje:
-        'Te esperamos en el salón. Si necesitás cambiarlo, podés hacerlo desde la app.',
-      boton: 'VER MI TURNO',
-    });
+  // push: true when the salon confirmed it; false when she did (booked or accepted the new time).
+  private avisarConfirmado(
+    turno: TurnoCompleto,
+    { push }: { push: boolean },
+  ): void {
+    this.avisarCliente(
+      turno,
+      'Tu turno está confirmado',
+      {
+        estilo: 'CONFIRMADO',
+        titulo: '¡Tu turno está confirmado!',
+        mensaje:
+          'Te esperamos en el salón. Si necesitás cambiarlo, podés hacerlo desde la app.',
+        boton: 'VER MI TURNO',
+      },
+      push ? 'TURNO_CONFIRMADO' : undefined,
+    );
   }
 
+  // With `push`, her phones also get it (PWA-265), titled like the email.
   private avisarCliente(
     turno: TurnoCompleto,
     asunto: string,
     texto: Pick<MailTurno, 'estilo' | 'titulo' | 'mensaje' | 'boton'> &
       Partial<Pick<MailTurno, 'alternativas'>>,
+    push?: TipoPush,
   ): void {
     const { usuario } = turno.cliente;
     this.enviar(usuario.email, asunto, {
@@ -1260,6 +1414,35 @@ export class TurnosService {
       ruta: '/mis-turnos',
       ...texto,
     });
+    if (push) {
+      this.pushService.avisar([usuario.id], {
+        titulo: texto.titulo,
+        cuerpo: this.cuerpoPush(turno),
+        data: { tipo: push, turnoId: turno.id },
+      });
+    }
+  }
+
+  // One push to all the professionals of the turno (PWA-265), with the client's name.
+  private pushAProfesionales(
+    turno: TurnoCompleto,
+    tipo: TipoPush,
+    titulo: string,
+  ): void {
+    const { nombre, apellido } = turno.cliente.usuario;
+    this.pushService.avisar(
+      this.profesionalesDe(turno).map((p) => p.id),
+      {
+        titulo,
+        cuerpo: `${nombre} ${apellido} · ${this.cuerpoPush(turno)}`,
+        data: { tipo, turnoId: turno.id },
+      },
+    );
+  }
+
+  /** "martes 10 de noviembre a las 10:00" */
+  private cuerpoPush(turno: TurnoCompleto): string {
+    return `${this.fechaLarga(dateAFecha(turno.fecha))} a las ${turno.horaInicio}`;
   }
 
   // Not awaited: a slow or failed email must not delay or break the request.

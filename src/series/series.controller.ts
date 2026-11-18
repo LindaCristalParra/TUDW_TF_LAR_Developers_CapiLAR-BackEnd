@@ -8,13 +8,10 @@ import {
   Patch,
   Post,
   Req,
-  UseGuards,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
-import { RolesGuard } from '../auth/roles.guard';
 import { ParseIdPipe } from '../common/parse-id.pipe';
 import { Rol } from '../generated/prisma/client';
 import { PublicUser } from '../users/users.service';
@@ -25,7 +22,6 @@ import { SeriesService } from './series.service';
 // F05: recurring turnos. The /** */ comments on each route are the Swagger summary and description.
 @ApiTags('series')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('series')
 export class SeriesController {
   constructor(private readonly seriesService: SeriesService) {}

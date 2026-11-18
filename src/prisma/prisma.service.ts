@@ -2,6 +2,7 @@ import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaMariaDb } from '@prisma/adapter-mariadb';
 import { PrismaClient } from '../generated/prisma/client';
+import { urlConCachePreparadas } from './database-url';
 
 @Injectable()
 export class PrismaService
@@ -10,7 +11,7 @@ export class PrismaService
 {
   constructor(configService: ConfigService) {
     const adapter = new PrismaMariaDb(
-      configService.getOrThrow<string>('DATABASE_URL'),
+      urlConCachePreparadas(configService.getOrThrow<string>('DATABASE_URL')),
     );
     super({ adapter });
   }

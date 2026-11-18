@@ -134,17 +134,16 @@ export async function resolverItems(
 
 /**
  * Minute range of each service of a turno: they are done one after another, starting at the
- * turno's time. `detalles` must come ordered by id.
+ * turno's time. `detalles` must come ordered by id. Uses the duration saved with the booking
+ * (PWA-268), not the service's current one, so editing a service doesn't move booked turnos.
  */
-export function tramosDeDetalles<
-  D extends { servicio: { tiempoDuracion: number } },
->(
+export function tramosDeDetalles<D extends { duracion: number }>(
   horaInicio: string,
   detalles: D[],
 ): { detalle: D; inicio: number; fin: number }[] {
   let inicio = aMinutos(horaInicio);
   return detalles.map((detalle) => {
-    const fin = inicio + detalle.servicio.tiempoDuracion;
+    const fin = inicio + detalle.duracion;
     const tramo = { detalle, inicio, fin };
     inicio = fin;
     return tramo;
@@ -165,9 +164,7 @@ export async function tramosOcupados(
       id: excluirTurnoId ? { not: excluirTurnoId } : undefined,
       detalles: { some: { profesionalId: { in: legajos } } },
     },
-    include: {
-      detalles: { orderBy: { id: 'asc' }, include: { servicio: true } },
-    },
+    include: { detalles: { orderBy: { id: 'asc' } } },
   });
 
   const tramos: Tramo[] = [];
