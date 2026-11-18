@@ -9,6 +9,14 @@
 # Node 24, as package.json "engines" asks for.
 FROM node:24-bookworm-slim AS base
 WORKDIR /app
+# Amazon RDS certificate authorities, to connect to the production database over TLS and check
+# that it's really RDS. Node doesn't trust them by default: NODE_EXTRA_CA_CERTS adds them for the
+# app (DATABASE_URL with ssl=true), and the Prisma CLI reads the file from sslcert= in the URL.
+# Not ADD --chmod: it also gives that mode to the folders it creates, and without the x bit the
+# node user can't open anything under /etc/ssl (Node fails to start reading openssl.cnf).
+ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /etc/ssl/rds/global-bundle.pem
+RUN chmod 755 /etc/ssl /etc/ssl/rds && chmod 644 /etc/ssl/rds/global-bundle.pem
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/rds/global-bundle.pem
 
 # All dependencies (dev included): to build, and for the Prisma CLI and tsx in "migrate".
 FROM base AS deps
