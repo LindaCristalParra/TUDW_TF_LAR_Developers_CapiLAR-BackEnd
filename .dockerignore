@@ -1,0 +1,26 @@
+# Built inside the image
+node_modules
+dist
+src/generated
+*.tsbuildinfo
+
+# Secrets: the server's .env is given to the container at run time, never copied into the image
+.env
+.env.*
+!.env.example
+
+# Local data
+uploads
+
+# Not needed to build
+.git
+.github
+.claude
+.agents
+.windsurf
+coverage
+test
+*.md
+docker-compose*.yml
+Dockerfile
+.dockerignore
