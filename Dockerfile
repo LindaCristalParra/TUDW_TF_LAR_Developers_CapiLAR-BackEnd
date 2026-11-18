@@ -12,6 +12,11 @@ WORKDIR /app
 
 # All dependencies (dev included): to build, and for the Prisma CLI and tsx in "migrate".
 FROM base AS deps
+# The Prisma CLI's engines need OpenSSL; the slim image doesn't have it. Installed before npm ci,
+# because Prisma picks its engine by the OpenSSL version it finds when installing. The API image
+# doesn't need it: the client goes through the mariadb adapter.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
 RUN npm ci
 
