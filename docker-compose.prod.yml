@@ -1,7 +1,8 @@
 # Production on the server (PWA-190): the API behind Caddy, which serves HTTPS with its own
 # certificate. The database is RDS (outside this file); the server's .env points to it.
 #
-#   docker compose -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.prod.yml --profile migrate build   # both images (a plain
+#                                                                       # build skips migrate)
 #   docker compose -f docker-compose.prod.yml run --rm migrate      # pending migrations
 #   docker compose -f docker-compose.prod.yml up -d                 # API + Caddy
 #
