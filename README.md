@@ -114,7 +114,7 @@ npm run build
 npm run start:prod
 ```
 
-The API runs on `http://localhost:3000` by default. `GET /health` answers `200 {"status":"ok"}` when the app is up and reaches the database, and `503` when it doesn't (the reason only goes to the log).
+The API runs on `http://localhost:3000` by default. `GET /health` answers `200 {"status":"ok"}` when the app is up and reaches the database, and `503` when it doesn't (the reason only goes to the log). In production it's only reachable from inside the server (Docker's healthcheck); Caddy answers `404` to it from the internet.
 
 ### YouCam (TP3, API 1)
 
@@ -190,7 +190,8 @@ docker compose -f docker-compose.prod.yml run --rm migrate                      
 docker compose -f docker-compose.prod.yml run --rm migrate npx prisma db seed   # first admin
 docker compose -f docker-compose.prod.yml up -d
 
-curl https://<API_DOMAIN>/health    # {"status":"ok"}
+docker compose -f docker-compose.prod.yml ps   # api: Up ... (healthy)
+curl https://<API_DOMAIN>/                     # the API answers over HTTPS
 ```
 
 ### Updating

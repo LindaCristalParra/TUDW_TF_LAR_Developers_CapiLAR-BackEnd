@@ -14,8 +14,8 @@ export class AppController {
   }
 
   /**
-   * Health check: the app is up and connected to the database. Public and without request
-   * limits, for Docker and uptime checks.
+   * Health check: the app is up and connected to the database. Without request limits, for
+   * Docker's healthcheck; in production Caddy doesn't expose it (it queries the database).
    */
   @Get('health')
   @Public()
