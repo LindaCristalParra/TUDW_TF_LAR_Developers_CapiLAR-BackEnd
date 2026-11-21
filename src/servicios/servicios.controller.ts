@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
@@ -18,6 +19,7 @@ import type { ArchivoSubido } from '../fotos/fotos.service';
 import { SubirFotoInterceptor } from '../fotos/subir-foto.interceptor';
 import { Rol } from '../generated/prisma/client';
 import { CreateServicioDto } from './dto/create-servicio.dto';
+import { ListServiciosQueryDto } from './dto/list-servicios-query.dto';
 import { UpdateServicioDto } from './dto/update-servicio.dto';
 import { ServiciosService } from './servicios.service';
 
@@ -33,26 +35,33 @@ export class ServiciosController {
    *
    * @remarks Público, no hace falta iniciar sesión. Solo los activos.
    * `precio` llega como texto, sin ceros de más al final (ej. "15000",
-   * "15000.5").
+   * "15000.5"). Cada servicio trae su `categoria` (`{ id, nombre }`) para
+   * agruparlos; `?categoriaId=` muestra solo los de esa categoría.
    */
   @Get()
   @Public()
-  findAll() {
-    return this.serviciosService.findAll();
+  findAll(@Query() query: ListServiciosQueryDto) {
+    return this.serviciosService.findAll(false, query.categoriaId);
   }
 
   /**
    * Listar todos los servicios, incluidos los dados de baja (solo ADMIN)
    *
    * @remarks Para ver los dados de baja y reactivarlos con `PATCH /servicios/:id/alta`.
+   * Acepta `?categoriaId=` como el listado público.
    */
   @Get('todos')
   @Roles(Rol.ADMIN)
-  findTodos() {
-    return this.serviciosService.findAll(true);
+  findTodos(@Query() query: ListServiciosQueryDto) {
+    return this.serviciosService.findAll(true, query.categoriaId);
   }
 
-  /** Crear un servicio (solo ADMIN) */
+  /**
+   * Crear un servicio (solo ADMIN)
+   *
+   * @remarks `categoriaId` es obligatorio; 400 si la categoría no existe o está
+   * dada de baja.
+   */
   @Post()
   @Roles(Rol.ADMIN)
   create(@Body() dto: CreateServicioDto) {
@@ -63,7 +72,8 @@ export class ServiciosController {
    * Modificar un servicio (solo ADMIN)
    *
    * @remarks Se actualizan solo los campos enviados. Los turnos ya reservados
-   * conservan el precio con el que se reservaron. 404 si no existe o está dado de baja.
+   * conservan el precio con el que se reservaron. 404 si no existe o está dado de baja;
+   * 400 si se cambia a una categoría que no existe o está dada de baja.
    */
   @Patch(':id')
   @Roles(Rol.ADMIN)
@@ -119,7 +129,8 @@ export class ServiciosController {
   /**
    * Dar de alta un servicio dado de baja (solo ADMIN)
    *
-   * @remarks 404 si no existe; 400 si ya está activo.
+   * @remarks 404 si no existe; 400 si ya está activo o si su categoría está
+   * dada de baja (primero hay que reactivar la categoría).
    */
   @Patch(':id/alta')
   @Roles(Rol.ADMIN)

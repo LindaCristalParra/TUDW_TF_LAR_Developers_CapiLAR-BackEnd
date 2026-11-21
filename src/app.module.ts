@@ -8,6 +8,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ArticulosModule } from './articulos/articulos.module';
 import { AuthModule } from './auth/auth.module';
+import { CategoriasModule } from './categorias/categorias.module';
 import { JwtAuthGuard } from './auth/jwt-auth.guard';
 import { RolesGuard } from './auth/roles.guard';
 import { LimiteGuard, throttlers } from './common/limites';
@@ -35,6 +36,7 @@ import { TurnosModule } from './turnos/turnos.module';
     PrismaModule,
     AuthModule,
     ServiciosModule,
+    CategoriasModule,
     AlergiasModule,
     ProfesionalesModule,
     TurnosModule,

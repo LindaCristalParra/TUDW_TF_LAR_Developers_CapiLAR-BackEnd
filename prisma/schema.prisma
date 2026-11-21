@@ -130,6 +130,16 @@ model Profesional {
   series          SerieTurno[]
 }
 
+// Service categories managed by the ADMIN, to group services in the front. fechaBaja: no longer
+// offered for new or edited services; it can't be set while an active service uses it.
+model Categoria {
+  id        Int       @id @default(autoincrement())
+  nombre    String    @unique @db.VarChar(100)
+  fechaBaja DateTime?
+
+  servicios Servicio[]
+}
+
 // Times of day are "HH:mm" strings in the salon's local time, so there are no time zone shifts.
 // fechaBaja on Servicio and DisponibilidadHoraria: logical delete (ARQ-01).
 // A date without working hours is a day off (there are no separate schedule blocks).
@@ -145,8 +155,10 @@ model Servicio {
   precio             Decimal   @db.Decimal(10, 2)
   // A client's booking with one of these stays PENDIENTE until a professional accepts it.
   requiereEvaluacion Boolean   @default(false)
+  categoriaId        Int
   fechaBaja          DateTime?
 
+  categoria       Categoria             @relation(fields: [categoriaId], references: [id])
   profesionales   ProfesionalServicio[]
   detallesDeTurno TurnoDetalle[]
   series          SerieTurno[]
