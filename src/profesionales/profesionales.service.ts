@@ -6,11 +6,7 @@ import {
   NotFoundException,
   StreamableFile,
 } from '@nestjs/common';
-import {
-  DisponibilidadHoraria,
-  Rol,
-  Servicio,
-} from '../generated/prisma/client';
+import { DisponibilidadHoraria, Rol } from '../generated/prisma/client';
 import {
   aMinutos,
   ahoraEnSalon,
@@ -23,6 +19,10 @@ import {
 import { MAX_JORNADA } from '../common/reglas-agenda';
 import { FotosService } from '../fotos/fotos.service';
 import { PrismaService } from '../prisma/prisma.service';
+import {
+  ServicioConCategoria,
+  servicioInclude,
+} from '../servicios/servicios.service';
 import { MAX_DIAS_ANTICIPACION, tramosOcupados } from '../turnos/agenda';
 import { PublicUser } from '../users/users.service';
 import { CreateDisponibilidadDto } from './dto/create-disponibilidad.dto';
@@ -120,21 +120,26 @@ export class ProfesionalesService {
   }
 
   // Active services the professional does.
-  findServicios(legajo: number): Promise<Servicio[]> {
+  findServicios(legajo: number): Promise<ServicioConCategoria[]> {
     return this.prisma.servicio.findMany({
       where: {
         fechaBaja: null,
         profesionales: { some: { profesionalId: legajo, fechaBaja: null } },
       },
+      include: servicioInclude,
       orderBy: { tipo: 'asc' },
     });
   }
 
   // Assigning a service that was removed before clears its fechaBaja.
-  async asignarServicio(legajo: number, servicioId: number): Promise<Servicio> {
+  async asignarServicio(
+    legajo: number,
+    servicioId: number,
+  ): Promise<ServicioConCategoria> {
     await this.assertActivo(legajo);
     const servicio = await this.prisma.servicio.findFirst({
       where: { id: servicioId, fechaBaja: null },
+      include: servicioInclude,
     });
     if (!servicio) {
       throw new NotFoundException('Servicio no encontrado');
