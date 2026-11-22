@@ -39,7 +39,10 @@ function regexDeNombre(palabra: string): RegExp {
 const EMAIL = /[\p{L}\d._%+-]+@[\p{L}\d.-]+\.\p{L}{2,}/gu;
 // Runs of digits with spaces, dashes, dots or parentheses, optionally after a "+" or a "(".
 const POSIBLE_TELEFONO = /[+(]?\d[\d\s\-.()]{5,}\d/g;
-const FECHA_ISO = /^\d{4}-\d{2}-\d{2}$/;
+// Dates are kept: the AI needs them to see how close together the chemical processes were.
+// ISO (2026-10-01) and how the staff writes them (15-03-2024, 22.11.2026, 5.3.26). With "/" they
+// never look like a phone.
+const FECHA = /^(\d{4}-\d{2}-\d{2}|\d{1,2}[-.]\d{1,2}[-.]\d{2,4})$/;
 // 8 digits or more: a phone (Argentina, with or without area code). Shorter runs are quantities.
 const MIN_DIGITOS_TELEFONO = 8;
 
@@ -51,7 +54,7 @@ export function ocultarDatosPersonales(
   let limpio = texto.replace(EMAIL, DATO_OCULTO);
   limpio = limpio.replace(POSIBLE_TELEFONO, (encontrado) => {
     const digitos = encontrado.replace(/\D/g, '').length;
-    return digitos >= MIN_DIGITOS_TELEFONO && !FECHA_ISO.test(encontrado.trim())
+    return digitos >= MIN_DIGITOS_TELEFONO && !FECHA.test(encontrado.trim())
       ? DATO_OCULTO
       : encontrado;
   });
