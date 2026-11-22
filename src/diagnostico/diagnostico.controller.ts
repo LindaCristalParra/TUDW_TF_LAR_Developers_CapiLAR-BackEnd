@@ -22,14 +22,21 @@ export class DiagnosticoController {
   ) {}
 
   /**
-   * Sugerir el diagnóstico de la ficha con IA (Gemini)
+   * Sugerir la ficha con IA (Gemini)
    *
-   * @remarks Analiza la última foto de ANTES de la ficha y devuelve una
-   * sugerencia para porosidad, elasticidad, % de canas, tipo y volumen de pelo,
-   * más una observación. **No guarda nada**: la profesional la revisa y guarda
-   * con `PATCH /fichas/:id`. Solo el profesional de ese servicio, con la ficha
-   * abierta (403 / 400). 400 si la ficha no tiene foto de ANTES. 503 si la IA
-   * está ocupada, 502 si no pudo analizar la foto, 504 si tardó demasiado.
+   * @remarks Le manda a Gemini las últimas 5 fichas cerradas de la clienta
+   * (diagnóstico, fórmulas, tratamientos, indicaciones y observaciones
+   * internas), sus alergias, lo ya cargado en esta ficha, los artículos de uso
+   * del salón con stock y la última foto de ANTES, si hay. Nunca su nombre ni
+   * sus datos de contacto. Devuelve una sugerencia para porosidad, elasticidad,
+   * % de canas, tipo y volumen de pelo, un `analisis` (evolución, alertas y
+   * recomendación) y `formulas` con la misma forma que las de la ficha (solo
+   * con artículos del inventario). **No guarda nada**: la profesional la
+   * revisa y guarda con `PATCH /fichas/:id`.
+   *
+   * Solo el profesional de ese servicio (403), con la ficha abierta (400).
+   * 400 si no hay foto de ANTES ni fichas anteriores. 503 si la IA está
+   * ocupada, 502 si no pudo armar la sugerencia, 504 si tardó demasiado.
    */
   @Post('fichas/:id/diagnostico')
   @ApiCreatedResponse({ type: SugerenciaDiagnostico })
@@ -37,10 +44,10 @@ export class DiagnosticoController {
     @Param('id', ParseIdPipe) id: number,
     @Req() req: Request,
   ): Promise<SugerenciaDiagnostico> {
-    const { buffer, mime } = await this.fichasService.fotoAntesParaDiagnostico(
+    const { contexto, foto } = await this.fichasService.contextoParaDiagnostico(
       id,
       req.user as PublicUser,
     );
-    return this.diagnosticoService.sugerir(buffer, mime);
+    return this.diagnosticoService.sugerir(contexto, foto);
   }
 }

@@ -5,9 +5,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiError, GenerateContentResponse } from '@google/genai';
+import { ArticuloDisponible, ContextoDiagnostico } from './contexto';
 import {
   DiagnosticoService,
-  SUGERENCIA_SIMULADA,
+  sugerenciaSimulada,
   validarSugerencia,
 } from './diagnostico.service';
 
@@ -16,10 +17,52 @@ function configCon(variables: Record<string, string>): ConfigService {
   return new ConfigService(variables);
 }
 
-const FOTO = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+const FOTO = {
+  buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0]),
+  mime: 'image/jpeg',
+};
+
+const TINTURA: ArticuloDisponible = {
+  id: 7,
+  nombre: 'Tintura 7.1',
+  marca: 'Question Professional Color',
+  tonalidad: '7.1',
+  tipoProducto: 'TINTURA',
+  unidad: 'G',
+};
+const OXIDANTE: ArticuloDisponible = {
+  id: 9,
+  nombre: 'Oxidante 20 vol',
+  marca: 'Livesolut',
+  tonalidad: '20vol',
+  tipoProducto: 'OXIDANTE',
+  unidad: 'ML',
+};
+
+function contexto(
+  parcial: Partial<ContextoDiagnostico> = {},
+): ContextoDiagnostico {
+  return {
+    fichaActual: {
+      fecha: '2026-11-22',
+      servicio: 'Retoque de Color',
+      porosidad: null,
+      elasticidad: null,
+      porcentajeCanas: null,
+      tipoDePelo: null,
+      volumenDePelo: null,
+      tratamientosPrevios: null,
+      observacionesInternas: null,
+    },
+    alergias: [],
+    fichasAnteriores: [],
+    articulos: [TINTURA, OXIDANTE],
+    ...parcial,
+  };
+}
 
 // The private Gemini call, replaced in the tests so nothing goes out to Google.
-type ConGenerar = { generar: DiagnosticoService['sugerir'] };
+type ConGenerar = { generar: jest.Mock };
 
 function serviceReal(generar: jest.Mock): DiagnosticoService {
   const service = new DiagnosticoService(
@@ -33,24 +76,29 @@ function respuesta(text: string | undefined): GenerateContentResponse {
   return { text } as GenerateContentResponse;
 }
 
+const ANALISIS_VACIO = { analisis: { alertas: [] }, formulas: [] };
+
 describe('validarSugerencia', () => {
-  it('keeps the fields with valid values', () => {
+  const articulos = [TINTURA, OXIDANTE];
+
+  it('keeps the diagnosis fields with valid values', () => {
     const texto = JSON.stringify({
       porosidad: 'ALTA',
       elasticidad: 'BAJA',
       porcentajeCanas: 25,
       tipoDePelo: 'RIZADO',
       volumenDePelo: 'FINO',
-      observaciones: '  Puntas abiertas.  ',
+      ...ANALISIS_VACIO,
     });
 
-    expect(validarSugerencia(texto)).toEqual({
+    expect(validarSugerencia(texto, articulos)).toEqual({
       porosidad: 'ALTA',
       elasticidad: 'BAJA',
       porcentajeCanas: 25,
       tipoDePelo: 'RIZADO',
       volumenDePelo: 'FINO',
-      observaciones: 'Puntas abiertas.',
+      analisis: { alertas: [] },
+      formulas: [],
     });
   });
 
@@ -61,55 +109,199 @@ describe('validarSugerencia', () => {
       porcentajeCanas: 150,
       tipoDePelo: 'CRESPO',
       volumenDePelo: 'MEDIO',
-      observaciones: 42,
       extra: 'no va',
+      ...ANALISIS_VACIO,
     });
 
-    expect(validarSugerencia(texto)).toEqual({ volumenDePelo: 'MEDIO' });
+    expect(validarSugerencia(texto, articulos)).toEqual({
+      volumenDePelo: 'MEDIO',
+      analisis: { alertas: [] },
+      formulas: [],
+    });
   });
 
   it('drops a negative or non-numeric gray percentage and rounds decimals', () => {
     expect(
-      validarSugerencia('{"porcentajeCanas":-5,"porosidad":"BAJA"}'),
-    ).toEqual({ porosidad: 'BAJA' });
-    expect(validarSugerencia('{"porcentajeCanas":"30"}')).toBeNull();
-    expect(validarSugerencia('{"porcentajeCanas":12.6}')).toEqual({
-      porcentajeCanas: 13,
+      validarSugerencia('{"porcentajeCanas":-5,"porosidad":"BAJA"}', articulos),
+    ).toMatchObject({ porosidad: 'BAJA' });
+    expect(
+      validarSugerencia('{"porcentajeCanas":-5,"porosidad":"BAJA"}', articulos),
+    ).not.toHaveProperty('porcentajeCanas');
+    expect(validarSugerencia('{"porcentajeCanas":"30"}', articulos)).toBeNull();
+    expect(
+      validarSugerencia('{"porcentajeCanas":12.6}', articulos),
+    ).toMatchObject({ porcentajeCanas: 13 });
+  });
+
+  it('trims the analysis and keeps only text alerts', () => {
+    const texto = JSON.stringify({
+      analisis: {
+        evolucion: '  Porosidad en aumento.  ',
+        alertas: [
+          'Alergia al amoníaco.',
+          3,
+          '  ',
+          'Decoloración hace 2 semanas.',
+        ],
+        recomendacion: 42,
+      },
+      formulas: [],
+    });
+
+    expect(validarSugerencia(texto, articulos)).toEqual({
+      analisis: {
+        evolucion: 'Porosidad en aumento.',
+        alertas: ['Alergia al amoníaco.', 'Decoloración hace 2 semanas.'],
+      },
+      formulas: [],
     });
   });
 
-  it('returns null for empty, broken or non-object answers', () => {
-    expect(validarSugerencia(undefined)).toBeNull();
-    expect(validarSugerencia('')).toBeNull();
-    expect(validarSugerencia('{"porosidad": "ALTA"')).toBeNull();
-    expect(validarSugerencia('["ALTA"]')).toBeNull();
-    expect(validarSugerencia('null')).toBeNull();
+  it('caps the alerts and the text lengths', () => {
+    const texto = JSON.stringify({
+      analisis: {
+        evolucion: 'x'.repeat(2000),
+        alertas: Array.from({ length: 10 }, (_, i) => `alerta ${i}`),
+      },
+    });
+
+    const s = validarSugerencia(texto, articulos);
+    expect(s?.analisis.evolucion).toHaveLength(1000);
+    expect(s?.analisis.alertas).toHaveLength(6);
   });
 
-  it('returns null when no field is valid', () => {
-    expect(validarSugerencia('{"porosidad":"X","tipoDePelo":1}')).toBeNull();
+  it('fills the formula items from the stock list and ignores what the model says about them', () => {
+    const texto = JSON.stringify({
+      analisis: { alertas: [] },
+      formulas: [
+        {
+          descripcion: ' Raíz ',
+          oxidanteVolumen: 20,
+          tiempoPoseMin: 35,
+          insumos: [
+            {
+              articuloId: 7,
+              cantidad: 30.456,
+              producto: 'Otra cosa',
+              unidad: 'ML',
+            },
+            { articuloId: 9, cantidad: 45 },
+          ],
+        },
+      ],
+    });
+
+    expect(validarSugerencia(texto, articulos)?.formulas).toEqual([
+      {
+        descripcion: 'Raíz',
+        oxidanteVolumen: 20,
+        tiempoPoseMin: 35,
+        insumos: [
+          {
+            articuloId: 7,
+            producto: 'Tintura 7.1',
+            marca: 'Question Professional Color',
+            tono: '7.1',
+            cantidad: 30.46,
+            unidad: 'G',
+          },
+          {
+            articuloId: 9,
+            producto: 'Oxidante 20 vol',
+            marca: 'Livesolut',
+            tono: '20vol',
+            cantidad: 45,
+            unidad: 'ML',
+          },
+        ],
+      },
+    ]);
+  });
+
+  it('drops items not in stock, repeated, or with a bad quantity, and empty formulas', () => {
+    const texto = JSON.stringify({
+      analisis: { alertas: [] },
+      formulas: [
+        {
+          oxidanteVolumen: 90,
+          tiempoPoseMin: 0,
+          insumos: [
+            { articuloId: 999, cantidad: 10 },
+            { articuloId: '7', cantidad: 10 },
+            { articuloId: 7, cantidad: 0 },
+            { articuloId: 7, cantidad: -3 },
+            { articuloId: 7, cantidad: '30' },
+            { articuloId: 7, cantidad: 30 },
+            { articuloId: 7, cantidad: 40 },
+          ],
+        },
+        { insumos: [{ articuloId: 999, cantidad: 10 }] },
+        'no es un objeto',
+      ],
+    });
+
+    expect(validarSugerencia(texto, articulos)?.formulas).toEqual([
+      {
+        insumos: [expect.objectContaining({ articuloId: 7, cantidad: 30 })],
+      },
+    ]);
+  });
+
+  it('keeps at most 5 formulas', () => {
+    const formula = { insumos: [{ articuloId: 7, cantidad: 10 }] };
+    const texto = JSON.stringify({
+      analisis: { alertas: [] },
+      formulas: Array.from({ length: 8 }, () => formula),
+    });
+
+    expect(validarSugerencia(texto, articulos)?.formulas).toHaveLength(5);
+  });
+
+  it('returns null for empty, broken or non-object answers', () => {
+    expect(validarSugerencia(undefined, articulos)).toBeNull();
+    expect(validarSugerencia('', articulos)).toBeNull();
+    expect(validarSugerencia('{"porosidad": "ALTA"', articulos)).toBeNull();
+    expect(validarSugerencia('["ALTA"]', articulos)).toBeNull();
+    expect(validarSugerencia('null', articulos)).toBeNull();
+  });
+
+  it('returns null when nothing is usable', () => {
+    expect(
+      validarSugerencia(
+        '{"porosidad":"X","tipoDePelo":1,"analisis":{"alertas":[]},"formulas":[{"insumos":[{"articuloId":999,"cantidad":1}]}]}',
+        articulos,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe('sugerenciaSimulada', () => {
+  it('uses the first dye and developer in stock and lists the allergies', () => {
+    const s = sugerenciaSimulada(contexto({ alergias: ['Amoníaco'] }));
+
+    expect(s.simulado).toBe(true);
+    expect(s.analisis.alertas).toEqual(['Alergia: Amoníaco.']);
+    expect(s.formulas[0].insumos.map((i) => i.articuloId)).toEqual([7, 9]);
+  });
+
+  it('has no formula without items in stock', () => {
+    expect(sugerenciaSimulada(contexto({ articulos: [] })).formulas).toEqual(
+      [],
+    );
   });
 });
 
 describe('DiagnosticoService', () => {
   describe('GEMINI_MODO=simulado', () => {
-    it('returns the fixed suggestion flagged as simulated', async () => {
+    it('returns the fixed suggestion without the Gemini key', async () => {
       const service = new DiagnosticoService(
         configCon({ GEMINI_MODO: 'simulado' }),
       );
 
-      const sugerencia = await service.sugerir(FOTO, 'image/jpeg');
+      const sugerencia = await service.sugerir(contexto(), FOTO);
 
-      expect(sugerencia).toEqual(SUGERENCIA_SIMULADA);
+      expect(sugerencia).toEqual(sugerenciaSimulada(contexto()));
       expect(sugerencia.simulado).toBe(true);
-    });
-
-    it('does not need the Gemini key', async () => {
-      const service = new DiagnosticoService(
-        configCon({ GEMINI_MODO: 'simulado' }),
-      );
-
-      await expect(service.sugerir(FOTO, 'image/jpeg')).resolves.toBeDefined();
     });
   });
 
@@ -119,21 +311,20 @@ describe('DiagnosticoService', () => {
         .fn()
         .mockResolvedValue(
           respuesta(
-            '{"porosidad":"MEDIA","tipoDePelo":"LISO","volumenDePelo":"OTRO"}',
+            '{"porosidad":"MEDIA","tipoDePelo":"LISO","volumenDePelo":"OTRO","analisis":{"alertas":[]},"formulas":[]}',
           ),
         );
       const service = serviceReal(generar);
+      const ctx = contexto();
 
-      await expect(service.sugerir(FOTO, 'image/png')).resolves.toEqual({
+      await expect(service.sugerir(ctx, null)).resolves.toEqual({
         porosidad: 'MEDIA',
         tipoDePelo: 'LISO',
+        analisis: { alertas: [] },
+        formulas: [],
         simulado: false,
       });
-      expect(generar).toHaveBeenCalledWith(
-        FOTO,
-        'image/png',
-        expect.any(AbortSignal),
-      );
+      expect(generar).toHaveBeenCalledWith(ctx, null, expect.any(AbortSignal));
     });
 
     it('answers 502 when Gemini gives nothing usable (empty or blocked)', async () => {
@@ -141,8 +332,8 @@ describe('DiagnosticoService', () => {
         jest.fn().mockResolvedValue(respuesta(undefined)),
       );
 
-      await expect(service.sugerir(FOTO, 'image/jpeg')).rejects.toThrow(
-        new BadGatewayException('No se pudo analizar la foto'),
+      await expect(service.sugerir(contexto(), FOTO)).rejects.toThrow(
+        new BadGatewayException('No se pudo armar la sugerencia'),
       );
     });
 
@@ -155,7 +346,7 @@ describe('DiagnosticoService', () => {
           ),
       );
 
-      await expect(service.sugerir(FOTO, 'image/jpeg')).rejects.toBeInstanceOf(
+      await expect(service.sugerir(contexto(), FOTO)).rejects.toBeInstanceOf(
         ServiceUnavailableException,
       );
     });
@@ -169,7 +360,7 @@ describe('DiagnosticoService', () => {
           ),
       );
 
-      await expect(service.sugerir(FOTO, 'image/jpeg')).rejects.toThrow(
+      await expect(service.sugerir(contexto(), FOTO)).rejects.toThrow(
         new ServiceUnavailableException(
           'El asistente de IA está ocupado. Probá en un minuto.',
         ),
@@ -185,7 +376,7 @@ describe('DiagnosticoService', () => {
           ),
       );
 
-      await expect(service.sugerir(FOTO, 'image/jpeg')).rejects.toBeInstanceOf(
+      await expect(service.sugerir(contexto(), FOTO)).rejects.toBeInstanceOf(
         BadGatewayException,
       );
     });
@@ -199,7 +390,7 @@ describe('DiagnosticoService', () => {
         .spyOn(AbortSignal, 'timeout')
         .mockReturnValueOnce(AbortSignal.abort());
 
-      await expect(service.sugerir(FOTO, 'image/jpeg')).rejects.toBeInstanceOf(
+      await expect(service.sugerir(contexto(), FOTO)).rejects.toBeInstanceOf(
         GatewayTimeoutException,
       );
     });

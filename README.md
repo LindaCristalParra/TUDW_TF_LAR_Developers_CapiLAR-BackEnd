@@ -221,7 +221,17 @@ The apps never call these APIs directly: they go through the backend, so the key
 
 ### Gemini (TP3, API 3)
 
-AI hair diagnosis for the technical record. `POST /fichas/:id/diagnostico` (PROFESIONAL) sends the latest ANTES photo of the record to Gemini with a response schema built from the Prisma enums (`NivelCapilar`, `TipoDePelo`, `VolumenDePelo`) and returns a suggestion for porosity, elasticity, gray percentage, hair type and volume, plus a short note. **Nothing is saved**: the front-end preloads the form and the professional saves it with `PATCH /fichas/:id`. Any value outside its enum or range is dropped before answering.
+AI suggestion for the technical record. `POST /fichas/:id/diagnostico` (PROFESIONAL) sends Gemini:
+
+- the client's last 5 closed records (diagnosis, formulas, previous treatments, care instructions and internal notes),
+- her allergies,
+- what is already filled in on this record,
+- the salon's items in stock (active, for salon use),
+- the latest ANTES photo of the record, if there is one.
+
+Never her name, email or phone. It answers with a suggestion for porosity, elasticity, gray percentage, hair type and volume, an `analisis` (evolution, alerts, recommendation) and `formulas` shaped like the record's, using only items from that stock list. The response schema is built from the Prisma enums. Any value outside its enum or range, and any item not in the list, is dropped before answering; producto, marca, tono and unidad come from the item, not from the model. **Nothing is saved**: the front-end preloads the form and the professional saves it with `PATCH /fichas/:id`.
+
+Without AI, `GET /clientes/:id/fichas/ultimo-diagnostico` returns the diagnosis of the client's latest closed record that has one, to preload a new record.
 
 | Variable | Value |
 | --- | --- |
@@ -231,7 +241,7 @@ AI hair diagnosis for the technical record. `POST /fichas/:id/diagnostico` (PROF
 
 To turn on real mode, put the key in `.env`, set `GEMINI_MODO=real` and restart the server. The free tier has a per-minute limit (answered as 503) and Google may use the data to improve its products: use photos without faces or personal data.
 
-Errors: 400 if the record has no ANTES photo, 403 if it belongs to another professional, 400 if it is closed, 503 if Gemini is busy (its 429 or 503), 502 if it can't analyze the photo, 504 after 30 s.
+Errors: 400 if there is neither an ANTES photo nor a previous record, 403 if it belongs to another professional, 400 if it is closed, 503 if Gemini is busy (its 429 or 503), 502 if it gives nothing usable, 504 after 30 s.
 
 ## Project structure
 

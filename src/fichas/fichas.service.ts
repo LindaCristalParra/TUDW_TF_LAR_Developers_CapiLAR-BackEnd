@@ -12,6 +12,12 @@ import {
   MAX_DECIMAL_10_3,
 } from '../articulos/dto/create-articulo.dto';
 import { ahoraEnSalon, dateAFecha } from '../common/fecha-hora';
+import {
+  ContextoDiagnostico,
+  DiagnosticoDeFicha,
+  MAX_ARTICULOS,
+  MAX_FICHAS_ANTERIORES,
+} from '../diagnostico/contexto';
 import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
 import {
   EstadoTurno,
@@ -353,21 +359,123 @@ export class FichasService {
     return this.findOne(id);
   }
 
-  // The latest ANTES photo, for the AI suggestion (TP3, API 3). Same rules as editing the record:
-  // only the professional of that service, while it's open.
-  async fotoAntesParaDiagnostico(
+  // What the AI suggestion (TP3, API 3) gets: this record, the client's last closed records, her
+  // allergies, the items in stock and the latest ANTES photo, if any. Same rules as editing the
+  // record: only the professional of that service, while it's open. Never her name or contact.
+  async contextoParaDiagnostico(
     id: number,
     actor: PublicUser,
-  ): Promise<{ buffer: Buffer; mime: string }> {
+  ): Promise<{
+    contexto: ContextoDiagnostico;
+    foto: { buffer: Buffer; mime: string } | null;
+  }> {
     const ficha = await this.findParaEditar(id, actor);
-    // fichaInclude orders the photos by id, so the last one is the newest.
-    const foto = ficha.fotos.filter((f) => f.tipo === MomentoFoto.ANTES).at(-1);
-    if (!foto) {
+    if (ficha.cerradaEn) {
       throw new BadRequestException(
-        'Subí una foto de ANTES para pedir la sugerencia',
+        'La ficha está cerrada: el turno ya se completó',
       );
     }
-    return this.fotosService.leerArchivo(foto.archivo);
+    const clienteId = ficha.turnoDetalle.turno.clienteId;
+
+    const [anteriores, cliente, articulos] = await Promise.all([
+      this.prisma.fichaTecnica.findMany({
+        where: {
+          id: { not: id },
+          fechaBaja: null,
+          cerradaEn: { not: null },
+          turnoDetalle: { turno: { clienteId } },
+        },
+        orderBy: [
+          { turnoDetalle: { turno: { fecha: 'desc' } } },
+          { turnoDetalle: { turno: { horaInicio: 'desc' } } },
+          { turnoDetalleId: 'desc' },
+        ],
+        take: MAX_FICHAS_ANTERIORES,
+        include: fichaInclude,
+      }),
+      this.prisma.cliente.findUniqueOrThrow({
+        where: { usuarioId: clienteId },
+        select: {
+          alergia: true,
+          alergias: { select: { alergia: { select: { nombre: true } } } },
+        },
+      }),
+      this.prisma.articulo.findMany({
+        where: {
+          fechaBaja: null,
+          uso: { in: [UsoArticulo.SALON, UsoArticulo.AMBOS] },
+          stock: { gt: 0 },
+        },
+        orderBy: [{ tipoProducto: 'asc' }, { nombre: 'asc' }, { id: 'asc' }],
+        take: MAX_ARTICULOS,
+        include: { marca: true },
+      }),
+    ]);
+
+    // fichaInclude orders the photos by id, so the last one is the newest.
+    const archivo = ficha.fotos
+      .filter((f) => f.tipo === MomentoFoto.ANTES)
+      .at(-1)?.archivo;
+    const foto = archivo ? await this.fotosService.leerArchivo(archivo) : null;
+    if (!foto && !anteriores.length) {
+      throw new BadRequestException(
+        'Para pedir la sugerencia, subí una foto de ANTES: la clienta no tiene fichas anteriores',
+      );
+    }
+
+    const diagnostico = (f: FichaCompleta): DiagnosticoDeFicha => ({
+      porosidad: f.porosidad,
+      elasticidad: f.elasticidad,
+      porcentajeCanas: f.porcentajeCanas,
+      tipoDePelo: f.tipoDePelo,
+      volumenDePelo: f.volumenDePelo,
+    });
+    return {
+      foto,
+      contexto: {
+        fichaActual: {
+          fecha: dateAFecha(ficha.turnoDetalle.turno.fecha),
+          servicio: ficha.turnoDetalle.servicio.tipo,
+          ...diagnostico(ficha),
+          tratamientosPrevios: ficha.tratamientosPrevios,
+          observacionesInternas: ficha.observacionesInternas,
+        },
+        alergias: [
+          ...cliente.alergias.map((a) => a.alergia.nombre),
+          ...(cliente.alergia ? [cliente.alergia] : []),
+        ],
+        fichasAnteriores: anteriores.map((f) => ({
+          fecha: dateAFecha(f.turnoDetalle.turno.fecha),
+          servicio: f.turnoDetalle.servicio.tipo,
+          ...diagnostico(f),
+          tratamientosPrevios: f.tratamientosPrevios,
+          observacionesInternas: f.observacionesInternas,
+          indicacionesCliente: f.indicacionesCliente,
+          formulas: f.formulas.map((formula) => ({
+            descripcion: formula.descripcion,
+            oxidanteVolumen: formula.oxidanteVolumen,
+            tiempoPoseMin: formula.tiempoPoseMin,
+            insumos: formula.insumos.map((i) => ({
+              producto: i.producto,
+              marca: i.marca,
+              tono: i.tono,
+              cantidad: i.cantidad?.toNumber() ?? null,
+              unidad: i.unidad,
+            })),
+          })),
+        })),
+        articulos: articulos.map((a) => ({
+          id: a.id,
+          nombre: a.nombre,
+          marca: a.marca.linea
+            ? `${a.marca.razonSocial} ${a.marca.linea}`
+            : a.marca.razonSocial,
+          tonalidad: a.tonalidad,
+          tipoProducto: a.tipoProducto,
+          unidad: a.tipoPeso,
+        })),
+      },
+    };
   }
 
   // Any professional; the client only their own, once the record is closed (404 otherwise).
