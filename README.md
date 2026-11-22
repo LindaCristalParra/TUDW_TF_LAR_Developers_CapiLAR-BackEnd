@@ -215,6 +215,34 @@ docker compose -f docker-compose.prod.yml restart api
 
 Profile photos are kept in the `uploads` Docker volume and Caddy's certificates in `caddy_data`; both survive new deploys. `docker compose down -v` deletes them, so don't use `-v` on the server.
 
+## External APIs (TP3)
+
+The apps never call these APIs directly: they go through the backend, so the keys stay on the server.
+
+### Gemini (TP3, API 3)
+
+AI suggestion for the technical record. `POST /fichas/:id/diagnostico` (PROFESIONAL) sends Gemini:
+
+- the client's last 5 closed records (diagnosis, formulas, previous treatments, care instructions and internal notes),
+- her allergies,
+- what is already filled in on this record,
+- the salon's items in stock (active, for salon use),
+- the latest ANTES photo of the record, if there is one.
+
+Never her name, email or phone: in the free-text fields, her name and surname and any email or phone number are replaced with `[dato oculto]` before sending (`src/diagnostico/privacidad.ts`). If the photo's file is missing on disk, it goes without the photo. Each professional can ask for 20 suggestions per hour (429 after that), so nobody uses up the shared quota. It answers with a suggestion for porosity, elasticity, gray percentage, hair type and volume, an `analisis` (evolution, alerts, recommendation) and `formulas` shaped like the record's, using only items from that stock list. The response schema is built from the Prisma enums. Any value outside its enum or range, and any item not in the list, is dropped before answering; producto, marca, tono and unidad come from the item, not from the model. **Nothing is saved**: the front-end preloads the form and the professional saves it with `PATCH /fichas/:id`.
+
+Without AI, `GET /clientes/:id/fichas/ultimo-diagnostico` returns the diagnosis of the client's latest closed record that has one, to preload a new record.
+
+| Variable | Value |
+| --- | --- |
+| `GEMINI_API_KEY` | Key from [Google AI Studio](https://aistudio.google.com/apikey) |
+| `GEMINI_MODEL` | Flash model with image input (default `gemini-3.6-flash`; better a fixed model than `gemini-flash-latest`, which jumps to each new Flash and is often overloaded right after launch) |
+| `GEMINI_MODO` | `simulado`: fixed answer, no call to Gemini (no quota used). `real` or empty: calls Gemini |
+
+To turn on real mode, put the key in `.env`, set `GEMINI_MODO=real` and restart the server. The free tier has a per-minute limit (answered as 503) and Google may use the data to improve its products: use photos without faces or personal data.
+
+Errors: 400 if there is neither an ANTES photo nor a previous record, 403 if it belongs to another professional, 400 if it is closed, 503 if Gemini is busy (its 429 or 503), 502 if it gives nothing usable, 504 after 30 s.
+
 ## Project structure
 
 ```

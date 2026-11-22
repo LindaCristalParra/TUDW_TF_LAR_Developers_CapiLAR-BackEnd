@@ -14,6 +14,7 @@ import { RolesGuard } from './auth/roles.guard';
 import { LimiteGuard, throttlers } from './common/limites';
 import { validarEntorno } from './common/validar-entorno';
 import { ComprasModule } from './compras/compras.module';
+import { DiagnosticoModule } from './diagnostico/diagnostico.module';
 import { FichasModule } from './fichas/fichas.module';
 import { HairColorModule } from './hair-color/hair-color.module';
 import { MarcasModule } from './marcas/marcas.module';
@@ -52,6 +53,8 @@ import { TurnosModule } from './turnos/turnos.module';
     ReportesModule,
     // TP3, API 1: hair color try-on with YouCam.
     HairColorModule,
+    // TP3, API 3: AI hair diagnosis with Gemini.
+    DiagnosticoModule,
   ],
   controllers: [AppController],
   providers: [
