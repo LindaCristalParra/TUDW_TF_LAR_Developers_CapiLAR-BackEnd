@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import { createReadStream } from 'fs';
-import { access, mkdir, unlink, writeFile } from 'fs/promises';
+import { access, mkdir, readFile, unlink, writeFile } from 'fs/promises';
 import { extname, join, resolve } from 'path';
 
 export const FOTO_MAX_BYTES = 2 * 1024 * 1024;
@@ -93,15 +93,31 @@ export class FotosService implements OnModuleInit {
 
   /** The photo as a response body with its content type. 404 if there is none. */
   async leer(nombre: string | null | undefined): Promise<StreamableFile> {
+    const { ruta, mime } = await this.buscar(nombre);
+    return new StreamableFile(createReadStream(ruta), {
+      type: mime,
+      disposition: 'inline',
+    });
+  }
+
+  /** The photo's bytes and content type, to send it elsewhere (e.g. the AI diagnosis). 404 if there is none. */
+  async leerArchivo(
+    nombre: string | null | undefined,
+  ): Promise<{ buffer: Buffer; mime: string }> {
+    const { ruta, mime } = await this.buscar(nombre);
+    return { buffer: await readFile(ruta), mime };
+  }
+
+  // Path and content type of a stored photo (from its extension). 404 if there is none.
+  private async buscar(
+    nombre: string | null | undefined,
+  ): Promise<{ ruta: string; mime: string }> {
     const formato = FORMATOS.find((f) => f.ext === extname(nombre ?? ''));
     const ruta = join(this.dir, nombre ?? '');
     if (!nombre || !formato || !(await this.existe(ruta))) {
       throw new NotFoundException('No tiene foto');
     }
-    return new StreamableFile(createReadStream(ruta), {
-      type: formato.mime,
-      disposition: 'inline',
-    });
+    return { ruta, mime: formato.mime };
   }
 
   private existe(ruta: string): Promise<boolean> {
