@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   StreamableFile,
 } from '@nestjs/common';
@@ -18,6 +19,7 @@ import {
   MAX_ARTICULOS,
   MAX_FICHAS_ANTERIORES,
 } from '../diagnostico/contexto';
+import { limpiarContexto } from '../diagnostico/privacidad';
 import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
 import {
   EstadoTurno,
@@ -70,6 +72,8 @@ const MAX_FOTOS_POR_MOMENTO = 5;
 
 @Injectable()
 export class FichasService {
+  private readonly logger = new Logger(FichasService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly fotosService: FotosService,
@@ -398,6 +402,8 @@ export class FichasService {
         select: {
           alergia: true,
           alergias: { select: { alergia: { select: { nombre: true } } } },
+          // Only to hide it from the free text (privacidad.ts); never sent.
+          usuario: { select: { nombre: true, apellido: true } },
         },
       }),
       this.prisma.articulo.findMany({
@@ -416,7 +422,20 @@ export class FichasService {
     const archivo = ficha.fotos
       .filter((f) => f.tipo === MomentoFoto.ANTES)
       .at(-1)?.archivo;
-    const foto = archivo ? await this.fotosService.leerArchivo(archivo) : null;
+    let foto: { buffer: Buffer; mime: string } | null = null;
+    if (archivo) {
+      try {
+        foto = await this.fotosService.leerArchivo(archivo);
+      } catch (error) {
+        // The row is there but the file isn't (e.g. a lost volume): go on without the photo.
+        if (!(error instanceof NotFoundException)) {
+          throw error;
+        }
+        this.logger.warn(
+          `Photo file ${archivo} of record ${id} is missing: the AI suggestion goes without it`,
+        );
+      }
+    }
     if (!foto && !anteriores.length) {
       throw new BadRequestException(
         'Para pedir la sugerencia, subí una foto de ANTES: la clienta no tiene fichas anteriores',
@@ -430,52 +449,50 @@ export class FichasService {
       tipoDePelo: f.tipoDePelo,
       volumenDePelo: f.volumenDePelo,
     });
-    return {
-      foto,
-      contexto: {
-        fichaActual: {
-          fecha: dateAFecha(ficha.turnoDetalle.turno.fecha),
-          servicio: ficha.turnoDetalle.servicio.tipo,
-          ...diagnostico(ficha),
-          tratamientosPrevios: ficha.tratamientosPrevios,
-          observacionesInternas: ficha.observacionesInternas,
-        },
-        alergias: [
-          ...cliente.alergias.map((a) => a.alergia.nombre),
-          ...(cliente.alergia ? [cliente.alergia] : []),
-        ],
-        fichasAnteriores: anteriores.map((f) => ({
-          fecha: dateAFecha(f.turnoDetalle.turno.fecha),
-          servicio: f.turnoDetalle.servicio.tipo,
-          ...diagnostico(f),
-          tratamientosPrevios: f.tratamientosPrevios,
-          observacionesInternas: f.observacionesInternas,
-          indicacionesCliente: f.indicacionesCliente,
-          formulas: f.formulas.map((formula) => ({
-            descripcion: formula.descripcion,
-            oxidanteVolumen: formula.oxidanteVolumen,
-            tiempoPoseMin: formula.tiempoPoseMin,
-            insumos: formula.insumos.map((i) => ({
-              producto: i.producto,
-              marca: i.marca,
-              tono: i.tono,
-              cantidad: i.cantidad?.toNumber() ?? null,
-              unidad: i.unidad,
-            })),
+    const contexto: ContextoDiagnostico = {
+      fichaActual: {
+        fecha: dateAFecha(ficha.turnoDetalle.turno.fecha),
+        servicio: ficha.turnoDetalle.servicio.tipo,
+        ...diagnostico(ficha),
+        tratamientosPrevios: ficha.tratamientosPrevios,
+        observacionesInternas: ficha.observacionesInternas,
+      },
+      alergias: [
+        ...cliente.alergias.map((a) => a.alergia.nombre),
+        ...(cliente.alergia ? [cliente.alergia] : []),
+      ],
+      fichasAnteriores: anteriores.map((f) => ({
+        fecha: dateAFecha(f.turnoDetalle.turno.fecha),
+        servicio: f.turnoDetalle.servicio.tipo,
+        ...diagnostico(f),
+        tratamientosPrevios: f.tratamientosPrevios,
+        observacionesInternas: f.observacionesInternas,
+        indicacionesCliente: f.indicacionesCliente,
+        formulas: f.formulas.map((formula) => ({
+          descripcion: formula.descripcion,
+          oxidanteVolumen: formula.oxidanteVolumen,
+          tiempoPoseMin: formula.tiempoPoseMin,
+          insumos: formula.insumos.map((i) => ({
+            producto: i.producto,
+            marca: i.marca,
+            tono: i.tono,
+            cantidad: i.cantidad?.toNumber() ?? null,
+            unidad: i.unidad,
           })),
         })),
-        articulos: articulos.map((a) => ({
-          id: a.id,
-          nombre: a.nombre,
-          marca: a.marca.linea
-            ? `${a.marca.razonSocial} ${a.marca.linea}`
-            : a.marca.razonSocial,
-          tonalidad: a.tonalidad,
-          tipoProducto: a.tipoProducto,
-          unidad: a.tipoPeso,
-        })),
-      },
+      })),
+      articulos: articulos.map((a) => ({
+        id: a.id,
+        nombre: a.nombre,
+        marca: a.marca.linea
+          ? `${a.marca.razonSocial} ${a.marca.linea}`
+          : a.marca.razonSocial,
+        tonalidad: a.tonalidad,
+        tipoProducto: a.tipoProducto,
+        unidad: a.tipoPeso,
+      })),
     };
+    return { foto, contexto: limpiarContexto(contexto, cliente.usuario) };
   }
 
   // Any professional; the client only their own, once the record is closed (404 otherwise).

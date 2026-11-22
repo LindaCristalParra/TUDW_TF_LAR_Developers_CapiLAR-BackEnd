@@ -20,7 +20,12 @@ import { PublicUser } from '../users/users.service';
 // Request limits (PWA-269, decided 08/11). Only the routes marked with @Limite() have one: there
 // is no general limit for the rest of the API. Counted in memory, so they assume one instance
 // of the app and start over when it restarts.
-export type NombreLimite = 'cuenta' | 'mail' | 'token' | 'youcam';
+export type NombreLimite =
+  'cuenta' | 'mail' | 'token' | 'youcam' | 'diagnostico';
+
+// Per user, not per IP: each call spends quota of an external API shared by everyone.
+const porUsuario = (req: Record<string, unknown>): string =>
+  `usuario:${(req as unknown as Request & { user?: PublicUser }).user?.id}`;
 
 const LIMITE_KEY = 'limite';
 
@@ -72,10 +77,18 @@ const LIMITES: Record<
   youcam: {
     ttl: hours(1),
     limit: 10,
-    getTracker: (req) =>
-      `usuario:${(req as Request & { user?: PublicUser }).user?.id}`,
+    getTracker: porUsuario,
     mensaje: 'Llegaste al límite de pruebas de color por hora.',
     doc: 'Más de 10 pruebas por hora del mismo usuario.',
+  },
+  // AI suggestion for a technical record (decided 22/11): the free Gemini quota is shared by the
+  // whole salon, so one professional can't use it all up.
+  diagnostico: {
+    ttl: hours(1),
+    limit: 20,
+    getTracker: porUsuario,
+    mensaje: 'Llegaste al límite de sugerencias con IA por hora.',
+    doc: 'Más de 20 sugerencias por hora del mismo usuario.',
   },
 };
 
