@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
   StreamableFile,
 } from '@nestjs/common';
@@ -12,6 +13,13 @@ import {
   MAX_DECIMAL_10_3,
 } from '../articulos/dto/create-articulo.dto';
 import { ahoraEnSalon, dateAFecha } from '../common/fecha-hora';
+import {
+  ContextoDiagnostico,
+  DiagnosticoDeFicha,
+  MAX_ARTICULOS,
+  MAX_FICHAS_ANTERIORES,
+} from '../diagnostico/contexto';
+import { limpiarContexto } from '../diagnostico/privacidad';
 import { ArchivoSubido, FotosService } from '../fotos/fotos.service';
 import {
   EstadoTurno,
@@ -32,6 +40,7 @@ import {
 import { CreateFichaDto } from './dto/create-ficha.dto';
 import { FichaDto } from './dto/ficha.dto';
 import { FormulaDto } from './dto/formula.dto';
+import { UltimoDiagnosticoDto } from './dto/ultimo-diagnostico.dto';
 
 const fichaInclude = {
   turnoDetalle: {
@@ -63,6 +72,8 @@ const MAX_FOTOS_POR_MOMENTO = 5;
 
 @Injectable()
 export class FichasService {
+  private readonly logger = new Logger(FichasService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly fotosService: FotosService,
@@ -232,6 +243,62 @@ export class FichasService {
     return fichas.map((f) => this.formatear(f));
   }
 
+  // Diagnosis of the client's latest closed record with at least one diagnosis field, to preload
+  // a new record (decided 22/11). Records without diagnosis (e.g. a plain haircut) are skipped.
+  async ultimoDiagnostico(clienteId: number): Promise<UltimoDiagnosticoDto> {
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { usuarioId: clienteId },
+    });
+    if (!cliente) {
+      throw new NotFoundException('Cliente no encontrado');
+    }
+    const ficha = await this.prisma.fichaTecnica.findFirst({
+      where: {
+        fechaBaja: null,
+        cerradaEn: { not: null },
+        turnoDetalle: { turno: { clienteId } },
+        OR: [
+          { porosidad: { not: null } },
+          { elasticidad: { not: null } },
+          { porcentajeCanas: { not: null } },
+          { tipoDePelo: { not: null } },
+          { volumenDePelo: { not: null } },
+        ],
+      },
+      orderBy: [
+        { turnoDetalle: { turno: { fecha: 'desc' } } },
+        { turnoDetalle: { turno: { horaInicio: 'desc' } } },
+        { turnoDetalleId: 'desc' },
+      ],
+      select: {
+        id: true,
+        porosidad: true,
+        elasticidad: true,
+        porcentajeCanas: true,
+        tipoDePelo: true,
+        volumenDePelo: true,
+        turnoDetalle: {
+          select: {
+            turno: { select: { fecha: true } },
+            servicio: { select: { tipo: true } },
+          },
+        },
+      },
+    });
+    if (!ficha) {
+      return { diagnostico: null };
+    }
+    const { id, turnoDetalle, ...campos } = ficha;
+    return {
+      diagnostico: {
+        fichaId: id,
+        fecha: dateAFecha(turnoDetalle.turno.fecha),
+        servicio: turnoDetalle.servicio.tipo,
+        ...campos,
+      },
+    };
+  }
+
   // The client's own records, once closed: only the care instructions and the photos.
   async findMias(actor: PublicUser) {
     const fichas = await this.prisma.fichaTecnica.findMany({
@@ -294,6 +361,138 @@ export class FichasService {
     });
     await this.fotosService.borrar(foto.archivo);
     return this.findOne(id);
+  }
+
+  // What the AI suggestion (TP3, API 3) gets: this record, the client's last closed records, her
+  // allergies, the items in stock and the latest ANTES photo, if any. Same rules as editing the
+  // record: only the professional of that service, while it's open. Never her name or contact.
+  async contextoParaDiagnostico(
+    id: number,
+    actor: PublicUser,
+  ): Promise<{
+    contexto: ContextoDiagnostico;
+    foto: { buffer: Buffer; mime: string } | null;
+  }> {
+    const ficha = await this.findParaEditar(id, actor);
+    if (ficha.cerradaEn) {
+      throw new BadRequestException(
+        'La ficha está cerrada: el turno ya se completó',
+      );
+    }
+    const clienteId = ficha.turnoDetalle.turno.clienteId;
+
+    const [anteriores, cliente, articulos] = await Promise.all([
+      this.prisma.fichaTecnica.findMany({
+        where: {
+          id: { not: id },
+          fechaBaja: null,
+          cerradaEn: { not: null },
+          turnoDetalle: { turno: { clienteId } },
+        },
+        orderBy: [
+          { turnoDetalle: { turno: { fecha: 'desc' } } },
+          { turnoDetalle: { turno: { horaInicio: 'desc' } } },
+          { turnoDetalleId: 'desc' },
+        ],
+        take: MAX_FICHAS_ANTERIORES,
+        include: fichaInclude,
+      }),
+      this.prisma.cliente.findUniqueOrThrow({
+        where: { usuarioId: clienteId },
+        select: {
+          alergia: true,
+          alergias: { select: { alergia: { select: { nombre: true } } } },
+          // Only to hide it from the free text (privacidad.ts); never sent.
+          usuario: { select: { nombre: true, apellido: true } },
+        },
+      }),
+      this.prisma.articulo.findMany({
+        where: {
+          fechaBaja: null,
+          uso: { in: [UsoArticulo.SALON, UsoArticulo.AMBOS] },
+          stock: { gt: 0 },
+        },
+        orderBy: [{ tipoProducto: 'asc' }, { nombre: 'asc' }, { id: 'asc' }],
+        take: MAX_ARTICULOS,
+        include: { marca: true },
+      }),
+    ]);
+
+    // fichaInclude orders the photos by id, so the last one is the newest.
+    const archivo = ficha.fotos
+      .filter((f) => f.tipo === MomentoFoto.ANTES)
+      .at(-1)?.archivo;
+    let foto: { buffer: Buffer; mime: string } | null = null;
+    if (archivo) {
+      try {
+        foto = await this.fotosService.leerArchivo(archivo);
+      } catch (error) {
+        // The row is there but the file isn't (e.g. a lost volume): go on without the photo.
+        if (!(error instanceof NotFoundException)) {
+          throw error;
+        }
+        this.logger.warn(
+          `Photo file ${archivo} of record ${id} is missing: the AI suggestion goes without it`,
+        );
+      }
+    }
+    if (!foto && !anteriores.length) {
+      throw new BadRequestException(
+        'Para pedir la sugerencia, subí una foto de ANTES: la clienta no tiene fichas anteriores',
+      );
+    }
+
+    const diagnostico = (f: FichaCompleta): DiagnosticoDeFicha => ({
+      porosidad: f.porosidad,
+      elasticidad: f.elasticidad,
+      porcentajeCanas: f.porcentajeCanas,
+      tipoDePelo: f.tipoDePelo,
+      volumenDePelo: f.volumenDePelo,
+    });
+    const contexto: ContextoDiagnostico = {
+      fichaActual: {
+        fecha: dateAFecha(ficha.turnoDetalle.turno.fecha),
+        servicio: ficha.turnoDetalle.servicio.tipo,
+        ...diagnostico(ficha),
+        tratamientosPrevios: ficha.tratamientosPrevios,
+        observacionesInternas: ficha.observacionesInternas,
+      },
+      alergias: [
+        ...cliente.alergias.map((a) => a.alergia.nombre),
+        ...(cliente.alergia ? [cliente.alergia] : []),
+      ],
+      fichasAnteriores: anteriores.map((f) => ({
+        fecha: dateAFecha(f.turnoDetalle.turno.fecha),
+        servicio: f.turnoDetalle.servicio.tipo,
+        ...diagnostico(f),
+        tratamientosPrevios: f.tratamientosPrevios,
+        observacionesInternas: f.observacionesInternas,
+        indicacionesCliente: f.indicacionesCliente,
+        formulas: f.formulas.map((formula) => ({
+          descripcion: formula.descripcion,
+          oxidanteVolumen: formula.oxidanteVolumen,
+          tiempoPoseMin: formula.tiempoPoseMin,
+          insumos: formula.insumos.map((i) => ({
+            producto: i.producto,
+            marca: i.marca,
+            tono: i.tono,
+            cantidad: i.cantidad?.toNumber() ?? null,
+            unidad: i.unidad,
+          })),
+        })),
+      })),
+      articulos: articulos.map((a) => ({
+        id: a.id,
+        nombre: a.nombre,
+        marca: a.marca.linea
+          ? `${a.marca.razonSocial} ${a.marca.linea}`
+          : a.marca.razonSocial,
+        tonalidad: a.tonalidad,
+        tipoProducto: a.tipoProducto,
+        unidad: a.tipoPeso,
+      })),
+    };
+    return { foto, contexto: limpiarContexto(contexto, cliente.usuario) };
   }
 
   // Any professional; the client only their own, once the record is closed (404 otherwise).

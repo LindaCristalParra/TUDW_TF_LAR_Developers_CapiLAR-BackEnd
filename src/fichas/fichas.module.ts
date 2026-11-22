@@ -9,7 +9,7 @@ import { FichasService } from './fichas.service';
   imports: [AlertasStockModule, FotosModule],
   controllers: [FichasController],
   providers: [FichasService, ConsumoService],
-  // Completing a turno discounts its records' supplies.
-  exports: [ConsumoService],
+  // Completing a turno discounts its records' supplies; DiagnosticoModule reads the record with its rules.
+  exports: [ConsumoService, FichasService],
 })
 export class FichasModule {}

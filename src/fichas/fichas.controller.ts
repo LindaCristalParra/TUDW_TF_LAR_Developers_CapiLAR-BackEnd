@@ -10,7 +10,13 @@ import {
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiConsumes,
+  ApiOkResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Roles } from '../auth/roles.decorator';
 import { ParseIdPipe } from '../common/parse-id.pipe';
@@ -22,6 +28,7 @@ import { PublicUser } from '../users/users.service';
 import { CreateFichaDto } from './dto/create-ficha.dto';
 import { FichaDto } from './dto/ficha.dto';
 import { SubirFotoFichaDto } from './dto/subir-foto-ficha.dto';
+import { UltimoDiagnosticoDto } from './dto/ultimo-diagnostico.dto';
 import { FichasService } from './fichas.service';
 
 // Technical records (F08). Professionals only, except the client's own view
@@ -71,6 +78,24 @@ export class FichasController {
   @Get('clientes/:id/fichas')
   findDelCliente(@Param('id', ParseIdPipe) id: number) {
     return this.fichasService.findDelCliente(id);
+  }
+
+  /**
+   * Último diagnóstico de una clienta (para precargar una ficha nueva)
+   *
+   * @remarks Porosidad, elasticidad, % de canas, tipo y volumen de pelo de su
+   * ficha **cerrada** más reciente que tenga al menos uno de esos datos (las que
+   * no tienen diagnóstico, como un corte, se saltean), con su fecha y servicio.
+   * `diagnostico: null` si no tiene ninguna. No usa IA: para la sugerencia con
+   * IA, `POST /fichas/:id/diagnostico`. Cualquier PROFESIONAL del salón. 404 si
+   * la clienta no existe.
+   */
+  @Get('clientes/:id/fichas/ultimo-diagnostico')
+  @ApiOkResponse({ type: UltimoDiagnosticoDto })
+  ultimoDiagnostico(
+    @Param('id', ParseIdPipe) id: number,
+  ): Promise<UltimoDiagnosticoDto> {
+    return this.fichasService.ultimoDiagnostico(id);
   }
 
   /**
