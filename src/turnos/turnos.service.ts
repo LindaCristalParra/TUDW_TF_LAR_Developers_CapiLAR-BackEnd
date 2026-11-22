@@ -43,8 +43,10 @@ import { VerificacionEmailService } from '../users/verificacion-email.service';
 import { WhatsAppService, aNumeroWhatsApp } from '../whatsapp/whatsapp.service';
 import {
   ESTADOS_CANCELABLES,
+  ESTADOS_SERVICIO_DEL_DIA,
   ItemTurno,
   assertDisponible,
+  assertServicioNoRepetido,
   cargarContexto,
   horariosLibres,
   tramosDeDetalles,
@@ -164,6 +166,8 @@ export class TurnosService {
       clienteId,
       reservaElCliente: esCliente,
     });
+    // 409 with the reason instead of an empty list (decided 22/11).
+    assertServicioNoRepetido(ctx);
     return {
       fecha: dto.fecha,
       duracion: ctx.duracionTotal,
@@ -497,10 +501,32 @@ export class TurnosService {
         'Este turno no tiene un cambio de horario para aceptar',
       );
     }
-    const actualizado = await this.prisma.turno.update({
-      where: { id },
-      data: { estado: EstadoTurno.CONFIRMADO },
-      include: turnoInclude,
+    // A REPROGRAMADO turno doesn't hold its services, so she may have booked one of them again
+    // that day meanwhile: one booking per service per day (decided 22/11).
+    const actualizado = await this.enTransaccion(async (tx) => {
+      const servicioIds = turno.detalles.map((d) => d.servicioId);
+      const repetido = await tx.turnoDetalle.findFirst({
+        where: {
+          servicioId: { in: servicioIds },
+          turno: {
+            clienteId: turno.clienteId,
+            fecha: turno.fecha,
+            estado: { in: ESTADOS_SERVICIO_DEL_DIA },
+            id: { not: id },
+          },
+        },
+        select: { servicio: { select: { tipo: true } } },
+      });
+      if (repetido) {
+        throw new ConflictException(
+          `Ya tenés un turno de ${repetido.servicio.tipo} ese día. Cancelá uno de los dos para aceptar el nuevo horario.`,
+        );
+      }
+      return tx.turno.update({
+        where: { id },
+        data: { estado: EstadoTurno.CONFIRMADO },
+        include: turnoInclude,
+      });
     });
     // She accepted it herself: email only (07/11).
     this.avisarConfirmado(actualizado, { push: false });
