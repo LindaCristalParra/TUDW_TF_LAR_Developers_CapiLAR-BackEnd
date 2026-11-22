@@ -28,6 +28,13 @@ export const ESTADOS_OCUPAN: EstadoTurno[] = [
   EstadoTurno.AUSENTE,
 ];
 
+// States that keep a service taken for the client that day: one booking per service per day
+// (decided 22/11). A REPROGRAMADO turno waits for the client to accept it, so it doesn't count.
+export const ESTADOS_SERVICIO_DEL_DIA: EstadoTurno[] = [
+  EstadoTurno.PENDIENTE,
+  EstadoTurno.CONFIRMADO,
+];
+
 // States a turno can still be canceled from.
 export const ESTADOS_CANCELABLES: EstadoTurno[] = [
   EstadoTurno.PENDIENTE,
@@ -69,6 +76,8 @@ export interface ContextoAgenda {
   ocupados: Tramo[];
   // the client's own turnos that day (whole windows), if a client is given
   turnosDelCliente: { inicio: number; fin: number }[];
+  // name of a requested service the client already has that day (PENDIENTE or CONFIRMADO), or null
+  servicioRepetido: string | null;
   // true when the client books for themselves (changes the overlap message)
   reservaElCliente: boolean;
 }
@@ -210,6 +219,12 @@ export async function cargarContexto(
   } = {},
 ): Promise<ContextoAgenda> {
   validarFecha(fecha);
+  const servicioIds = items.map((i) => i.servicioId);
+  if (new Set(servicioIds).size !== servicioIds.length) {
+    throw new BadRequestException(
+      'Un turno no puede tener el mismo servicio dos veces',
+    );
+  }
   const resueltos = await resolverItems(db, items);
   const duracionTotal = resueltos.reduce((t, i) => t + i.duracion, 0);
   if (duracionTotal > MAX_DURACION_TURNO) {
@@ -238,9 +253,17 @@ export async function cargarContexto(
               ? { not: opciones.excluirTurnoId }
               : undefined,
           },
+          include: { detalles: { select: { servicioId: true } } },
         })
       : Promise.resolve([]),
   ]);
+
+  const yaReservados = new Set(
+    delCliente
+      .filter((t) => ESTADOS_SERVICIO_DEL_DIA.includes(t.estado))
+      .flatMap((t) => t.detalles.map((d) => d.servicioId)),
+  );
+  const repetido = resueltos.find((i) => yaReservados.has(i.servicioId));
 
   const disponibilidad = new Map<number, { inicio: number; fin: number }[]>();
   for (const h of horarios) {
@@ -262,8 +285,27 @@ export async function cargarContexto(
       inicio: aMinutos(t.horaInicio),
       fin: aMinutos(t.horaFin),
     })),
+    servicioRepetido: repetido?.tipo ?? null,
     reservaElCliente: opciones.reservaElCliente ?? false,
   };
+}
+
+/** Why the client can't book these services that day at any time, or null. */
+export function motivoServicioRepetido(ctx: ContextoAgenda): string | null {
+  if (!ctx.servicioRepetido) {
+    return null;
+  }
+  return ctx.reservaElCliente
+    ? `Ya tenés un turno de ${ctx.servicioRepetido} ese día`
+    : `El cliente ya tiene un turno de ${ctx.servicioRepetido} ese día`;
+}
+
+/** 409 when the client already has one of these services that day. */
+export function assertServicioNoRepetido(ctx: ContextoAgenda): void {
+  const motivo = motivoServicioRepetido(ctx);
+  if (motivo) {
+    throw new ConflictException(motivo);
+  }
 }
 
 /** Why a start time doesn't work, or null when it does. */
@@ -271,6 +313,10 @@ export function motivoNoDisponible(
   ctx: ContextoAgenda,
   inicioTurno: number,
 ): string | null {
+  const repetido = motivoServicioRepetido(ctx);
+  if (repetido) {
+    return repetido;
+  }
   const finTurno = inicioTurno + ctx.duracionTotal;
   if (finTurno > 24 * 60) {
     return 'El turno no puede terminar después de la medianoche';
