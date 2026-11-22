@@ -32,6 +32,7 @@ import {
 import { CreateFichaDto } from './dto/create-ficha.dto';
 import { FichaDto } from './dto/ficha.dto';
 import { FormulaDto } from './dto/formula.dto';
+import { UltimoDiagnosticoDto } from './dto/ultimo-diagnostico.dto';
 
 const fichaInclude = {
   turnoDetalle: {
@@ -230,6 +231,62 @@ export class FichasService {
       include: fichaInclude,
     });
     return fichas.map((f) => this.formatear(f));
+  }
+
+  // Diagnosis of the client's latest closed record with at least one diagnosis field, to preload
+  // a new record (decided 22/11). Records without diagnosis (e.g. a plain haircut) are skipped.
+  async ultimoDiagnostico(clienteId: number): Promise<UltimoDiagnosticoDto> {
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { usuarioId: clienteId },
+    });
+    if (!cliente) {
+      throw new NotFoundException('Cliente no encontrado');
+    }
+    const ficha = await this.prisma.fichaTecnica.findFirst({
+      where: {
+        fechaBaja: null,
+        cerradaEn: { not: null },
+        turnoDetalle: { turno: { clienteId } },
+        OR: [
+          { porosidad: { not: null } },
+          { elasticidad: { not: null } },
+          { porcentajeCanas: { not: null } },
+          { tipoDePelo: { not: null } },
+          { volumenDePelo: { not: null } },
+        ],
+      },
+      orderBy: [
+        { turnoDetalle: { turno: { fecha: 'desc' } } },
+        { turnoDetalle: { turno: { horaInicio: 'desc' } } },
+        { turnoDetalleId: 'desc' },
+      ],
+      select: {
+        id: true,
+        porosidad: true,
+        elasticidad: true,
+        porcentajeCanas: true,
+        tipoDePelo: true,
+        volumenDePelo: true,
+        turnoDetalle: {
+          select: {
+            turno: { select: { fecha: true } },
+            servicio: { select: { tipo: true } },
+          },
+        },
+      },
+    });
+    if (!ficha) {
+      return { diagnostico: null };
+    }
+    const { id, turnoDetalle, ...campos } = ficha;
+    return {
+      diagnostico: {
+        fichaId: id,
+        fecha: dateAFecha(turnoDetalle.turno.fecha),
+        servicio: turnoDetalle.servicio.tipo,
+        ...campos,
+      },
+    };
   }
 
   // The client's own records, once closed: only the care instructions and the photos.
