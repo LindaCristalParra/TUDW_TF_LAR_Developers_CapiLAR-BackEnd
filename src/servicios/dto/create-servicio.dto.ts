@@ -79,4 +79,13 @@ export class CreateServicioDto {
   // Optional but not nullable (NOT NULL column): unlike @IsOptional(), null is validated.
   @ValidateIf((_, value) => value !== undefined)
   requiereEvaluacion?: boolean;
+
+  /**
+   * Categoría del servicio (ver `GET /categorias`). Tiene que estar activa.
+   * @example 2
+   */
+  @Min(1, { message: 'La categoría no es válida' })
+  @IsInt({ message: 'La categoría debe ser un id numérico' })
+  @IsNotEmpty({ message: 'La categoría es obligatoria' })
+  categoriaId: number;
 }
