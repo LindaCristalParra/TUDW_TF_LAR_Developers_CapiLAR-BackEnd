@@ -46,6 +46,19 @@ describe('ocultarDatosPersonales', () => {
     expect(ocultarDatosPersonales(texto, DATOS)).toBe(texto);
   });
 
+  it('keeps dates written with dashes or dots, as the staff writes them', () => {
+    const texto =
+      'Decoloración 15-03-2024, retoque 22.11.2026, matiz 5.3.26 y 1-2-2025.';
+    expect(ocultarDatosPersonales(texto, DATOS)).toBe(texto);
+  });
+
+  it('still hides phones written with dashes or spaces next to a date', () => {
+    expect(
+      ocultarDatosPersonales('El 15-03-2024 dejó el 15-4412-3456', DATOS),
+    ).toBe(`El 15-03-2024 dejó el ${X}`);
+    expect(ocultarDatosPersonales('Tel 299-412-3456', DATOS)).toBe(`Tel ${X}`);
+  });
+
   it('ignores name parts shorter than 3 letters', () => {
     expect(
       ocultarDatosPersonales('Lo de siempre', {
