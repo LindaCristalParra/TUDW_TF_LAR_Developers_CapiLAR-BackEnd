@@ -45,6 +45,10 @@ export class TurnosController {
    * Un PROFESIONAL puede mandar `turnoId` al reprogramar (su horario actual
    * cuenta como libre) o `clienteId` al cargar un turno para un cliente; en los
    * dos casos se tienen en cuenta los otros turnos de ese cliente.
+   *
+   * Un cliente puede tener cada servicio una sola vez por día: si ya tiene uno
+   * de los pedidos ese día (PENDIENTE o CONFIRMADO), 409 con el motivo en vez
+   * de la lista. 400 si un servicio viene dos veces.
    */
   @Post('horarios-libres')
   @HttpCode(HttpStatus.OK)
@@ -59,7 +63,9 @@ export class TurnosController {
    * horario). PROFESIONAL: carga un turno para un cliente con `clienteId`
    * (queda CONFIRMADO). CLIENTE con `serieId`: reserva una fecha de su serie que
    * estaba ocupada, en otro horario de ese día (queda CONFIRMADO y en la serie).
-   * 409 si el horario no está disponible.
+   * 409 si el horario no está disponible o si el cliente ya tiene uno de esos
+   * servicios ese día (PENDIENTE o CONFIRMADO; vale para todos los roles).
+   * 400 si un servicio viene dos veces en el turno.
    */
   @Post()
   @Roles(Rol.CLIENTE, Rol.PROFESIONAL)
@@ -129,6 +135,8 @@ export class TurnosController {
    *
    * @remarks Cambia fecha, hora y, opcionalmente, los profesionales. Queda
    * REPROGRAMADO hasta que el cliente lo acepte; el horario nuevo queda ocupado.
+   * 409 si no está disponible o si el cliente ya tiene uno de sus servicios ese
+   * día.
    */
   @Patch(':id/reprogramar')
   @Roles(Rol.PROFESIONAL)
@@ -143,7 +151,9 @@ export class TurnosController {
   /**
    * Aceptar el nuevo horario (CLIENTE dueño del turno)
    *
-   * @remarks REPROGRAMADO → CONFIRMADO.
+   * @remarks REPROGRAMADO → CONFIRMADO. 409 si mientras tanto el cliente
+   * reservó uno de esos servicios ese mismo día: tiene que cancelar uno de los
+   * dos.
    */
   @Patch(':id/aceptar-reprogramacion')
   @Roles(Rol.CLIENTE)
