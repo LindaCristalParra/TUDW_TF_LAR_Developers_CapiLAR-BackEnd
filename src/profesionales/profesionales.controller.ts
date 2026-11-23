@@ -90,10 +90,11 @@ export class ProfesionalesController {
   /**
    * Ver la foto de perfil de un profesional
    *
-   * @remarks Devuelve la imagen. Cualquier usuario logueado. 404 si no tiene
-   * foto (`tieneFoto` en `GET /profesionales`).
+   * @remarks Devuelve la imagen. Público, se puede usar directo en un `<img>`.
+   * 404 si no tiene foto (`tieneFoto` en `GET /profesionales`).
    */
   @Get(':legajo/foto')
+  @Public()
   @ApiFoto()
   verFoto(@Param('legajo', ParseIdPipe) legajo: number) {
     return this.profesionalesService.verFoto(legajo);
